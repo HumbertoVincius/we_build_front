@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { fetchAgentMessages } from "@/services/agentMessages";
+import {
+  deleteAgentMessage,
+  fetchAgentMessages,
+  updateAgentMessage
+} from "@/services/agentMessages";
 import type { AgentMessage } from "@/types";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { format } from "date-fns";
@@ -36,6 +40,16 @@ export default function LogsPage() {
   const [messages, setMessages] = useState<AgentMessage[]>([]);
   const [count, setCount] = useState(0);
   const [activeMessage, setActiveMessage] = useState<AgentMessage | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState({
+    content: "",
+    status: "",
+    fromAgent: "",
+    toAgent: ""
+  });
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (!supabaseReady) {
@@ -84,6 +98,74 @@ export default function LogsPage() {
   function updateFilter<Key extends keyof LogFilters>(key: Key, value: string) {
     setFilters((prev) => ({ ...prev, [key]: value }));
     setPage(0);
+  }
+
+  useEffect(() => {
+    setEditDraft({
+      content: activeMessage?.message_content ?? "",
+      status: activeMessage?.status ?? "",
+      fromAgent: activeMessage?.from_agent ?? "",
+      toAgent: activeMessage?.to_agent ?? ""
+    });
+    setActionError(null);
+  }, [activeMessage]);
+
+  async function handleSaveEdit() {
+    if (!activeMessage) return;
+    setIsSaving(true);
+    setActionError(null);
+    const sanitizedStatus = editDraft.status.trim() || activeMessage.status;
+    const sanitizedFrom = editDraft.fromAgent.trim() || activeMessage.from_agent;
+    const sanitizedTo = editDraft.toAgent.trim();
+    const payload = {
+      message_content: editDraft.content,
+      status: sanitizedStatus,
+      from_agent: sanitizedFrom,
+      to_agent: sanitizedTo.length ? sanitizedTo : null
+    };
+    const { data, error: updateError } = await updateAgentMessage(
+      activeMessage.id,
+      payload
+    );
+    if (updateError || !data) {
+      setActionError(updateError ?? "Falha ao atualizar mensagem.");
+      setIsSaving(false);
+      return;
+    }
+
+    setMessages((prev) =>
+      prev.map((item) =>
+        item.id === data.id ? { ...item, ...data } : item
+      )
+    );
+    setActiveMessage(data);
+    setIsEditing(false);
+    setIsSaving(false);
+  }
+
+  async function handleDelete() {
+    if (!activeMessage) return;
+    const confirmed = window.confirm(
+      "Tem certeza que deseja excluir esta mensagem? Esta ação não pode ser desfeita."
+    );
+    if (!confirmed) {
+      return;
+    }
+    setIsDeleting(true);
+    setActionError(null);
+    const { error: deleteError } = await deleteAgentMessage(activeMessage.id);
+    if (deleteError) {
+      setActionError(deleteError);
+      setIsDeleting(false);
+      return;
+    }
+
+    const remaining = messages.filter((item) => item.id !== activeMessage.id);
+    setMessages(remaining);
+    setCount((prev) => Math.max(0, prev - 1));
+    setActiveMessage(remaining[0] ?? null);
+
+    setIsDeleting(false);
   }
 
   if (!supabaseReady) {
@@ -174,6 +256,7 @@ export default function LogsPage() {
                   <th className="px-4 py-3 text-left">De</th>
                   <th className="px-4 py-3 text-left">Para</th>
                   <th className="px-4 py-3 text-left">Status</th>
+                  <th className="px-4 py-3 text-left">Conteúdo</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-900 text-sm">
@@ -196,6 +279,9 @@ export default function LogsPage() {
                       <td className="px-4 py-2 text-slate-300">{message.to_agent ?? "—"}</td>
                       <td className="px-4 py-2">
                         <StatusBadge status={message.status} />
+                      </td>
+                      <td className="max-w-xs px-4 py-2 text-xs text-slate-400">
+                        {truncate(message.message_content)}
                       </td>
                     </tr>
                   );
@@ -227,7 +313,21 @@ export default function LogsPage() {
 
         <div className="hidden flex-1 flex-col overflow-hidden lg:flex">
           {activeMessage ? (
-            <MessageDetails message={activeMessage} />
+            <MessageDetails
+              message={activeMessage}
+              onEdit={() => {
+                setEditDraft({
+                  content: activeMessage.message_content ?? "",
+                  status: activeMessage.status ?? "",
+                  fromAgent: activeMessage.from_agent ?? "",
+                  toAgent: activeMessage.to_agent ?? ""
+                });
+                setIsEditing(true);
+              }}
+              onDelete={handleDelete}
+              isDeleting={isDeleting}
+              actionError={actionError}
+            />
           ) : (
             <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
               Selecione uma mensagem para ver detalhes.
@@ -235,18 +335,70 @@ export default function LogsPage() {
           )}
         </div>
       </div>
+      {isEditing && activeMessage ? (
+        <EditContentDialog
+          value={editDraft}
+          onChange={setEditDraft}
+          onClose={() => {
+            setIsEditing(false);
+            setEditDraft({
+              content: activeMessage.message_content ?? "",
+              status: activeMessage.status ?? "",
+              fromAgent: activeMessage.from_agent ?? "",
+              toAgent: activeMessage.to_agent ?? ""
+            });
+          }}
+          onSave={handleSaveEdit}
+          isSaving={isSaving}
+          error={actionError}
+        />
+      ) : null}
     </div>
   );
 }
 
-function MessageDetails({ message }: { message: AgentMessage }) {
+function MessageDetails({
+  message,
+  onEdit,
+  onDelete,
+  isDeleting,
+  actionError
+}: {
+  message: AgentMessage;
+  onEdit: () => void;
+  onDelete: () => void;
+  isDeleting: boolean;
+  actionError: string | null;
+}) {
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-slate-800 bg-slate-900/60 px-6 py-4">
-        <p className="text-sm font-semibold text-white">Detalhes da mensagem</p>
-        <p className="text-xs text-slate-400">
-          {format(new Date(message.created_at), "dd/MM/yyyy HH:mm:ss")}
-        </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-semibold text-white">Detalhes da mensagem</p>
+            <p className="text-xs text-slate-400">
+              {format(new Date(message.created_at), "dd/MM/yyyy HH:mm:ss")}
+            </p>
+            <div className="mt-1">
+              <StatusBadge status={message.status} />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              className="rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-slate-500 hover:text-white"
+              onClick={onEdit}
+            >
+              Editar conteúdo
+            </button>
+            <button
+              className="rounded-md border border-rose-700 px-3 py-1.5 text-xs font-medium text-rose-200 transition hover:border-rose-500 hover:text-rose-100 disabled:cursor-not-allowed disabled:border-rose-900 disabled:text-rose-800"
+              onClick={onDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? "Excluindo…" : "Excluir"}
+            </button>
+          </div>
+        </div>
       </div>
       <div className="flex-1 space-y-6 overflow-auto px-6 py-6 text-sm text-slate-200">
         <div>
@@ -285,6 +437,11 @@ function MessageDetails({ message }: { message: AgentMessage }) {
           <MetadataItem label="Deploy" value={message.deploy_id} />
           <MetadataItem label="QA" value={message.qa_id} />
         </div>
+        {actionError ? (
+          <div className="rounded-md border border-rose-900 bg-rose-950/30 px-4 py-3 text-xs text-rose-200">
+            {actionError}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -297,5 +454,145 @@ function MetadataItem({ label, value }: { label: string; value: string | null })
       <span className="text-sm text-white">{value ?? "—"}</span>
     </div>
   );
+}
+
+function EditContentDialog({
+  value,
+  onChange,
+  onClose,
+  onSave,
+  isSaving,
+  error
+}: {
+  value: {
+    content: string;
+    status: string;
+    fromAgent: string;
+    toAgent: string;
+  };
+  onChange: (value: {
+    content: string;
+    status: string;
+    fromAgent: string;
+    toAgent: string;
+  }) => void;
+  onClose: () => void;
+  onSave: () => void;
+  isSaving: boolean;
+  error: string | null;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur">
+      <div className="w-full max-w-2xl rounded-xl border border-slate-700 bg-slate-900 p-6 shadow-xl">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-white">Editar conteúdo</h2>
+          <button
+            className="text-slate-400 transition hover:text-white"
+            onClick={onClose}
+            disabled={isSaving}
+          >
+            ✕
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-slate-400">
+          Ajuste os metadados e conteúdo da mensagem e salve suas alterações.
+        </p>
+        <div className="mt-4 grid grid-cols-1 gap-4 text-sm text-slate-200 sm:grid-cols-2">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs uppercase tracking-wide text-slate-500">
+              Status
+            </label>
+            <input
+              className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-slate-500 focus:outline-none focus:ring-0 disabled:opacity-60"
+              value={value.status}
+              onChange={(event) =>
+                onChange({
+                  ...value,
+                  status: event.target.value
+                })
+              }
+              disabled={isSaving}
+              placeholder="completed, running..."
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs uppercase tracking-wide text-slate-500">
+              De (from_agent)
+            </label>
+            <input
+              className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-slate-500 focus:outline-none focus:ring-0 disabled:opacity-60"
+              value={value.fromAgent}
+              onChange={(event) =>
+                onChange({
+                  ...value,
+                  fromAgent: event.target.value
+                })
+              }
+              disabled={isSaving}
+              placeholder="Agent origem"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs uppercase tracking-wide text-slate-500">
+              Para (to_agent)
+            </label>
+            <input
+              className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-slate-500 focus:outline-none focus:ring-0 disabled:opacity-60"
+              value={value.toAgent}
+              onChange={(event) =>
+                onChange({
+                  ...value,
+                  toAgent: event.target.value
+                })
+              }
+              disabled={isSaving}
+              placeholder="Agent destino"
+            />
+          </div>
+        </div>
+        <label className="mt-4 block text-xs uppercase tracking-wide text-slate-500">
+          Conteúdo
+        </label>
+        <textarea
+          className="mt-2 h-56 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-slate-500 focus:outline-none focus:ring-0 disabled:opacity-60"
+          value={value.content}
+          onChange={(event) =>
+            onChange({
+              ...value,
+              content: event.target.value
+            })
+          }
+          disabled={isSaving}
+        />
+        {error ? (
+          <div className="mt-3 rounded-md border border-rose-900 bg-rose-950/30 px-3 py-2 text-xs text-rose-200">
+            {error}
+          </div>
+        ) : null}
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            className="rounded-md border border-slate-700 px-4 py-2 text-xs font-medium text-slate-300 transition hover:border-slate-500 hover:text-white disabled:cursor-not-allowed disabled:border-slate-800 disabled:text-slate-600"
+            onClick={onClose}
+            disabled={isSaving}
+          >
+            Cancelar
+          </button>
+          <button
+            className="rounded-md border border-emerald-600 bg-emerald-600/20 px-4 py-2 text-xs font-semibold text-emerald-200 transition hover:border-emerald-500 hover:bg-emerald-600/30 hover:text-emerald-100 disabled:cursor-not-allowed disabled:border-emerald-900 disabled:text-emerald-800"
+            onClick={onSave}
+            disabled={isSaving}
+          >
+            {isSaving ? "Salvando…" : "Salvar alterações"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function truncate(value: string | null, length = 60) {
+  if (!value) return "—";
+  if (value.length <= length) return value;
+  return `${value.slice(0, length)}…`;
 }
 

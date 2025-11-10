@@ -79,6 +79,10 @@ export async function fetchAgentMessages(
 export async function fetchAgentMessageById(
   id: string
 ): Promise<AgentMessage | null> {
+  if (!isSupabaseConfigured) {
+    return null;
+  }
+
   const { data, error } = await supabase
     .from("agent_messages")
     .select("*")
@@ -91,5 +95,74 @@ export async function fetchAgentMessageById(
   }
 
   return data;
+}
+
+export async function updateAgentMessage(
+  id: string,
+  payload: Partial<
+    Pick<
+      AgentMessage,
+      "message_content" | "status" | "from_agent" | "to_agent" | "updated_at"
+    >
+  >
+): Promise<{ data?: AgentMessage; error?: string }> {
+  if (!isSupabaseConfigured) {
+    return {
+      error:
+        "Supabase credentials are missing. Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+    };
+  }
+
+  const updates = {
+    ...payload,
+    updated_at: new Date().toISOString()
+  };
+
+  const { data, error } = await supabase
+    .from("agent_messages")
+    .update(updates)
+    .eq("id", id)
+    .select();
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  const updatedRecord = Array.isArray(data) ? (data[0] as AgentMessage | undefined) : data;
+
+  if (updatedRecord) {
+    return { data: updatedRecord };
+  }
+
+  const { data: fallback, error: fetchError } = await supabase
+    .from("agent_messages")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (fetchError) {
+    return { error: fetchError.message };
+  }
+
+  return { data: fallback ?? undefined };
+}
+
+export async function deleteAgentMessage(
+  id: string
+): Promise<{ error?: string }> {
+  if (!isSupabaseConfigured) {
+    return {
+      error:
+        "Supabase credentials are missing. Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+    };
+  }
+
+  const { error } = await supabase.from("agent_messages").delete().eq("id", id);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return {};
 }
 
