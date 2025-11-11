@@ -49,7 +49,7 @@ export async function fetchDocuments<T extends DocumentRecord>(
 
   if (filters.search) {
     query = query.or(
-      ["system_id", "archetype", "revision"]
+      ["notes", "archetype", "project_id"]
         .map((column) => `${column}.ilike.%${filters.search}%`)
         .join(",")
     );
@@ -85,5 +85,29 @@ export async function fetchDocumentById<T extends DocumentRecord>(
   }
 
   return data as T;
+}
+
+export async function deleteDocument(
+  type: DocumentType,
+  id: string
+): Promise<{ error?: string }> {
+  if (!isSupabaseConfigured) {
+    return {
+      error:
+        "Supabase credentials are missing. Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+    };
+  }
+
+  const config = DOCUMENT_TYPES[type];
+  const { error } = await supabase
+    .from(config.table)
+    .delete()
+    .eq(config.idKey as string, id);
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return {};
 }
 

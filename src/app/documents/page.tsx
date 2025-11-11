@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { DOCUMENT_TYPES } from "@/lib/documentConfig";
 import type { DocumentRecord, DocumentType } from "@/types";
-import { fetchDocuments } from "@/services/documents";
+import { deleteDocument, fetchDocuments } from "@/services/documents";
 import { JsonViewer } from "@/components/documents/json-viewer";
 import { CodegenViewer } from "@/components/documents/codegen-viewer";
 import { format } from "date-fns";
@@ -40,6 +40,7 @@ export default function DocumentsPage() {
   const [total, setTotal] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [collapseSignal, setCollapseSignal] = useState(0);
   const [expandSignal, setExpandSignal] = useState(0);
 
@@ -96,6 +97,62 @@ export default function DocumentsPage() {
     setPage(0);
   }
 
+  async function handleDeleteDocument(document: DocumentRecord) {
+    if (deletingId) {
+      return;
+    }
+
+    const currentType = activeTab;
+    const config = DOCUMENT_TYPES[currentType];
+    const documentId = (document as Record<string, unknown>)[config.idKey as string];
+
+    if (!documentId || typeof documentId !== "string") {
+      setError("Não foi possível identificar o documento selecionado.");
+      return;
+    }
+
+    const confirmed = window.confirm("Tem certeza que deseja excluir este documento?");
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingId(documentId);
+    setError(null);
+
+    const { error: deleteError } = await deleteDocument(currentType, documentId);
+    if (deleteError) {
+      setError(`Erro ao excluir documento: ${deleteError}`);
+      setDeletingId(null);
+      return;
+    }
+
+    const updatedDocuments = documents.filter((item) => {
+      const itemId = (item as Record<string, unknown>)[config.idKey as string];
+      return itemId !== documentId;
+    });
+
+    setDocuments(updatedDocuments);
+    setTotal((prev) => Math.max(0, prev - 1));
+    setSelectedDocument((previousSelected) => {
+      if (!previousSelected) {
+        return updatedDocuments[0] ?? null;
+      }
+
+      const previousSelectedId = (previousSelected as Record<string, unknown>)[config.idKey as string];
+      if (previousSelectedId === documentId) {
+        return updatedDocuments[0] ?? null;
+      }
+
+      return previousSelected;
+    });
+
+    if (!updatedDocuments.length && page > 0) {
+      setPage((prev) => Math.max(0, prev - 1));
+    }
+
+    setDeletingId(null);
+  }
+
   useEffect(() => {
     setExpandSignal((prev) => prev + 1);
   }, [selectedDocument, activeTab]);
@@ -143,7 +200,7 @@ export default function DocumentsPage() {
           onChange={(event) => updateFilter("projectId", event.target.value)}
         />
         <input
-          placeholder="Buscar por revision, system_id, archetype…"
+          placeholder="Buscar por notas, archetype…"
           className="flex-1 rounded-md border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-white placeholder:text-slate-500 focus:border-slate-500 focus:outline-none focus:ring-0"
           value={filters.search}
           onChange={(event) => updateFilter("search", event.target.value)}
@@ -199,22 +256,51 @@ export default function DocumentsPage() {
                 (selectedDocument as Record<string, unknown>)[config.idKey as string] === id;
 
               return (
-                <button
+                <div
                   key={id as string}
                   className={clsx(
-                    "block w-full border-b border-slate-900 px-4 py-3 text-left transition",
+                    "group border-b border-slate-900 px-4 py-3 text-left transition cursor-pointer",
                     isActive ? "bg-slate-800/80 text-white" : "hover:bg-slate-900/40"
                   )}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setSelectedDocument(document)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedDocument(document);
+                    }
+                  }}
                 >
-                  <p className="text-sm font-semibold text-white">
-                    {config.label} {document.revision ?? ""}
-                  </p>
-                  <p className="mt-1 text-xs text-slate-400">{createdAt}</p>
-                  <p className="mt-2 line-clamp-2 text-xs text-slate-300">
-                    {document.archetype ?? document.system_id ?? document.project_id ?? "—"}
-                  </p>
-                </button>
+                  <div className="flex items-start gap-3">
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-white">
+                        {config.label} {document.revision ?? ""}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-400">{createdAt}</p>
+                      <p className="mt-2 line-clamp-2 text-xs text-slate-300">
+                        {document.notes ?? document.archetype ?? document.project_id ?? "—"}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      className={clsx(
+                        "rounded border px-2 py-1 text-xs font-medium transition",
+                        "border-rose-900 text-rose-200 hover:border-rose-700 hover:text-white",
+                        deletingId === id
+                          ? "cursor-wait border-rose-950 text-rose-600"
+                          : "group-hover:border-rose-700 group-hover:text-white"
+                      )}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleDeleteDocument(document);
+                      }}
+                      disabled={deletingId !== null}
+                    >
+                      {deletingId === id ? "Excluindo…" : "Excluir"}
+                    </button>
+                  </div>
+                </div>
               );
             })}
             {!isLoading && !documents.length ? (
@@ -228,7 +314,10 @@ export default function DocumentsPage() {
         <section className="flex flex-1 flex-col overflow-hidden">
           {selectedDocument ? (
             <>
-              <DocumentMetadata type={activeTab} document={selectedDocument} />
+              <DocumentMetadata
+                type={activeTab}
+                document={selectedDocument}
+              />
               <div className="flex flex-1 flex-col overflow-hidden p-6">
                 {activeTab !== "codegen" ? (
                   <div className="mb-4 flex justify-end gap-2">
@@ -290,28 +379,31 @@ function DocumentMetadata({
     ? format(new Date(document.created_at), "dd/MM/yyyy HH:mm:ss")
     : "—";
 
-  const metaEntries = [
+  const baseMetaEntries = [
     { label: "Projeto", value: document.project_id ?? "—" },
-    { label: "System ID", value: document.system_id ?? "—" },
     { label: "Archetype", value: document.archetype ?? "—" },
     { label: "Locale", value: document.locale ?? "—" },
-    { label: "Revision", value: document.revision ?? "—" }
+    { label: "Notas", value: document.notes ?? "—" }
   ];
 
+  const contentMetadataEntries = extractContentMetadataEntries(document.content);
   const parameterEntries =
     type === "prd" ? extractMetadataParameters(document.content) : [];
 
   return (
     <div className="border-b border-slate-800 bg-slate-950/80 px-6 py-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+        <div className="flex-1">
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{config.label}</p>
-          <h2 className="text-xl font-semibold text-white">{id as string}</h2>
+          <h2 className="text-xl font-semibold text-white break-all">{id as string}</h2>
+          {document.notes ? (
+            <p className="mt-2 max-w-2xl text-sm text-slate-300">{document.notes}</p>
+          ) : null}
         </div>
-        <div className="text-xs text-slate-400">Criado em {createdAt}</div>
+        <div className="text-xs text-slate-400 whitespace-nowrap">Criado em {createdAt}</div>
       </div>
       <dl className="mt-4 grid grid-cols-1 gap-4 text-sm text-slate-300 sm:grid-cols-3">
-        {metaEntries.map((entry) => (
+        {[...baseMetaEntries, ...contentMetadataEntries].map((entry) => (
           <div key={entry.label}>
             <dt className="text-xs uppercase tracking-wide text-slate-500">{entry.label}</dt>
             <dd className="text-white">{entry.value}</dd>
@@ -326,6 +418,17 @@ function DocumentMetadata({
       </dl>
     </div>
   );
+}
+
+function extractContentMetadataEntries(content: unknown): { label: string; value: string }[] {
+  const entries: { label: string; value: string }[] = [];
+
+  const completionTokens = findCompletionTokens(content);
+  if (completionTokens !== null) {
+    entries.push({ label: "Completion tokens", value: formatParameterValue(completionTokens) });
+  }
+
+  return entries;
 }
 
 function extractMetadataParameters(content: unknown): { label: string; value: string }[] {
@@ -369,6 +472,45 @@ function extractMetadataParameters(content: unknown): { label: string; value: st
   }
 
   return [];
+}
+
+function findCompletionTokens(content: unknown): unknown {
+  if (!content || typeof content !== "object") {
+    return null;
+  }
+
+  const metadata = (content as Record<string, unknown>).metadata;
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  const metadataRecord = metadata as Record<string, unknown>;
+  const candidates: Array<string[]> = [
+    ["completion_tokens"],
+    ["completionTokens"],
+    ["usage", "completion_tokens"],
+    ["usage", "completionTokens"],
+    ["token_usage", "completion_tokens"],
+    ["token_usage", "completionTokens"]
+  ];
+
+  for (const path of candidates) {
+    const value = getNestedValue(metadataRecord, path);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function getNestedValue(source: Record<string, unknown>, path: string[]): unknown {
+  return path.reduce<unknown>((current, key) => {
+    if (!current || typeof current !== "object") {
+      return undefined;
+    }
+    return (current as Record<string, unknown>)[key];
+  }, source);
 }
 
 function formatParameterValue(value: unknown): string {

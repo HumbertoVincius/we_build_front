@@ -34,10 +34,11 @@ export type DocumentType =
 export interface BaseDocumentRecord {
   created_at: string | null;
   project_id: string | null;
-  system_id: string | null;
+  system_id?: string | null;
   archetype: string | null;
   locale: string | null;
-  revision: string | null;
+  revision?: string | null;
+  notes: string | null;
   content: unknown;
 }
 
