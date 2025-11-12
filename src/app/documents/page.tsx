@@ -5,7 +5,7 @@ import { DOCUMENT_TYPES } from "@/lib/documentConfig";
 import type { DocumentRecord, DocumentType } from "@/types";
 import { deleteDocument, fetchDocuments } from "@/services/documents";
 import { JsonViewer } from "@/components/documents/json-viewer";
-import { CodegenViewer } from "@/components/documents/codegen-viewer";
+import { CodegenViewer, resolveCodegenFiles } from "@/components/documents/codegen-viewer";
 import { format } from "date-fns";
 import clsx from "clsx";
 import { Spinner } from "@/components/ui/spinner";
@@ -43,6 +43,19 @@ export default function DocumentsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [collapseSignal, setCollapseSignal] = useState(0);
   const [expandSignal, setExpandSignal] = useState(0);
+  const codegenFiles = useMemo(() => {
+    if (!selectedDocument) {
+      return [];
+    }
+    try {
+      return resolveCodegenFiles(selectedDocument.content);
+    } catch {
+      return [];
+    }
+  }, [selectedDocument]);
+  const shouldUseCodeViewer = Boolean(
+    selectedDocument && (activeTab === "codegen" || codegenFiles.length > 0)
+  );
 
   useEffect(() => {
     if (!supabaseReady) {
@@ -330,7 +343,7 @@ export default function DocumentsPage() {
                 document={selectedDocument}
               />
               <div className="flex flex-1 flex-col overflow-hidden p-6">
-                {activeTab !== "codegen" ? (
+                {!shouldUseCodeViewer ? (
                   <div className="mb-4 flex justify-end gap-2">
                     <button
                       className="rounded-md border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-slate-500 hover:text-white"
@@ -346,7 +359,7 @@ export default function DocumentsPage() {
                     </button>
                   </div>
                 ) : null}
-                {activeTab === "codegen" ? (
+                {shouldUseCodeViewer ? (
                   <CodegenViewer payload={selectedDocument.content} />
                 ) : (
                   <div className="flex-1 overflow-auto rounded-lg border border-slate-800 bg-slate-950/60 p-4">

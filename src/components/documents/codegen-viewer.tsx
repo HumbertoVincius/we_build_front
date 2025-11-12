@@ -5,8 +5,9 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { duotoneDark } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import clsx from "clsx";
 import { guessLanguage } from "@/lib/language";
+import { decodeEscapedString } from "@/lib/text";
 
-interface CodegenFile {
+export interface CodegenFile {
   path: string;
   content: string;
   language?: string;
@@ -89,7 +90,7 @@ function buildTree(files: CodegenFile[]): TreeNode {
 }
 
 export function CodegenViewer({ payload }: { payload: unknown }) {
-  const files = useMemo(() => extractFiles(payload), [payload]);
+  const files = useMemo(() => resolveCodegenFiles(payload), [payload]);
   const tree = useMemo(() => buildTree(files), [files]);
   const [activePath, setActivePath] = useState<string | null>(
     files.length ? files[0].path : null
@@ -139,36 +140,60 @@ export function CodegenViewer({ payload }: { payload: unknown }) {
   );
 }
 
-function extractFiles(payload: unknown): CodegenFile[] {
+export function resolveCodegenFiles(payload: unknown): CodegenFile[] {
+  const toCodegenFile = (entry: unknown): CodegenFile | null => {
+    if (!entry || typeof entry !== "object") return null;
+    const candidate = entry as Record<string, unknown>;
+    const path = typeof candidate.path === "string" ? candidate.path : null;
+    const content =
+      typeof candidate.content === "string"
+        ? candidate.content
+        : typeof candidate.source === "string"
+          ? candidate.source
+          : null;
+
+    if (!path || content === null) return null;
+
+    return {
+      path,
+      content: decodeEscapedString(content),
+      language: typeof candidate.language === "string" ? candidate.language : undefined
+    };
+  };
+
+  const normalizeArray = (entries: unknown[]): CodegenFile[] =>
+    entries.map(toCodegenFile).filter(Boolean) as CodegenFile[];
+
+  if (Array.isArray(payload)) {
+    return normalizeArray(payload);
+  }
+
   if (!payload || typeof payload !== "object") {
     return [];
   }
 
   const record = payload as Record<string, unknown>;
-  const files = Array.isArray(record.files) ? record.files : [];
 
-  return files
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") return null;
-      const candidate = entry as Record<string, unknown>;
-      const path = typeof candidate.path === "string" ? candidate.path : null;
-      const content =
-        typeof candidate.content === "string"
-          ? candidate.content
-          : typeof candidate.source === "string"
-            ? candidate.source
-            : null;
+  if (Array.isArray(record.files)) {
+    const files = normalizeArray(record.files);
+    if (files.length) {
+      return files;
+    }
+  }
 
-      if (!path || content === null) return null;
+  if (Array.isArray(record.content)) {
+    const files = normalizeArray(record.content);
+    if (files.length) {
+      return files;
+    }
+  }
 
-      return {
-        path,
-        content,
-        language:
-          typeof candidate.language === "string" ? candidate.language : undefined
-      };
-    })
-    .filter(Boolean) as CodegenFile[];
+  const single = toCodegenFile(record);
+  if (single) {
+    return [single];
+  }
+
+  return [];
 }
 
 function Tree({

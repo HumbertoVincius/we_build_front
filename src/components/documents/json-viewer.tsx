@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { duotoneDark } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import { guessLanguage } from "@/lib/language";
+import { decodeEscapedString } from "@/lib/text";
 
 type JsonValue = string | number | boolean | null | JsonValue[] | Record<string, JsonValue>;
 
@@ -298,19 +299,4 @@ function tryParseJson(value: string): unknown | null {
   }
 }
 
-function decodeEscapedString(input: string): string {
-  if (!input.includes("\\")) {
-    return input;
-  }
-
-  let decoded = input;
-
-  decoded = decoded.replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n").replace(/\\r/g, "\r");
-  decoded = decoded.replace(/\\t/g, "\t");
-  decoded = decoded.replace(/\\u([\dA-Fa-f]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-  decoded = decoded.replace(/\\"/g, '"').replace(/\\'/g, "'");
-  decoded = decoded.replace(/\\\\/g, "\\");
-
-  return decoded;
-}
 
