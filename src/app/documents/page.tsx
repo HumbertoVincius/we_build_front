@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DOCUMENT_TYPES } from "@/lib/documentConfig";
 import type { DocumentRecord, DocumentType } from "@/types";
 import { deleteDocument, fetchDocuments } from "@/services/documents";
@@ -43,6 +43,8 @@ export default function DocumentsPage() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [collapseSignal, setCollapseSignal] = useState(0);
   const [expandSignal, setExpandSignal] = useState(0);
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const codegenFiles = useMemo(() => {
     if (!selectedDocument) {
       return [];
@@ -108,6 +110,43 @@ export default function DocumentsPage() {
   function updateFilter<Key extends keyof DocumentFilters>(key: Key, value: DocumentFilters[Key]) {
     setFilters((prev) => ({ ...prev, [key]: value }));
     setPage(0);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  async function handleCopyContent() {
+    if (!selectedDocument) return;
+
+    if (copyTimeoutRef.current) {
+      clearTimeout(copyTimeoutRef.current);
+      copyTimeoutRef.current = null;
+    }
+
+    try {
+      const raw = selectedDocument.content;
+      const text =
+        typeof raw === "string" ? raw : JSON.stringify(raw ?? {}, null, 2);
+
+      await navigator.clipboard.writeText(text);
+      setCopyFeedback("Conteúdo copiado!");
+      copyTimeoutRef.current = setTimeout(() => {
+        setCopyFeedback(null);
+        copyTimeoutRef.current = null;
+      }, 2000);
+    } catch (copyError) {
+      console.error(copyError);
+      setCopyFeedback("Não foi possível copiar o conteúdo.");
+      copyTimeoutRef.current = setTimeout(() => {
+        setCopyFeedback(null);
+        copyTimeoutRef.current = null;
+      }, 3000);
+    }
   }
 
   async function handleDeleteDocument(document: DocumentRecord) {
@@ -343,22 +382,36 @@ export default function DocumentsPage() {
                 document={selectedDocument}
               />
               <div className="flex flex-1 flex-col overflow-hidden p-6">
-                {!shouldUseCodeViewer ? (
-                  <div className="mb-4 flex justify-end gap-2">
-                    <button
-                      className="rounded-md border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-slate-500 hover:text-white"
-                      onClick={() => setCollapseSignal((prev) => prev + 1)}
-                    >
-                      Colapsar tudo
-                    </button>
-                    <button
-                      className="rounded-md border border-slate-500 bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition hover:border-slate-400"
-                      onClick={() => setExpandSignal((prev) => prev + 1)}
-                    >
-                      Expandir tudo
-                    </button>
-                  </div>
-                ) : null}
+                <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+                  {!shouldUseCodeViewer ? (
+                    <>
+                      <button
+                        type="button"
+                        className="rounded-md border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-200 transition hover:border-slate-500 hover:text-white"
+                        onClick={() => setCollapseSignal((prev) => prev + 1)}
+                      >
+                        Colapsar tudo
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-md border border-slate-500 bg-slate-800 px-3 py-1.5 text-xs font-medium text-white transition hover:border-slate-400"
+                        onClick={() => setExpandSignal((prev) => prev + 1)}
+                      >
+                        Expandir tudo
+                      </button>
+                    </>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="rounded-md border border-emerald-600 bg-emerald-600/20 px-3 py-1.5 text-xs font-medium text-emerald-200 transition hover:border-emerald-500 hover:bg-emerald-600/30 hover:text-emerald-100"
+                    onClick={handleCopyContent}
+                  >
+                    Copiar conteúdo
+                  </button>
+                  {copyFeedback ? (
+                    <span className="text-xs text-emerald-300">{copyFeedback}</span>
+                  ) : null}
+                </div>
                 {shouldUseCodeViewer ? (
                   <CodegenViewer payload={selectedDocument.content} />
                 ) : (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   deleteAgentMessage,
   fetchAgentMessages,
@@ -8,10 +8,10 @@ import {
 } from "@/services/agentMessages";
 import type { AgentMessage } from "@/types";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { format } from "date-fns";
 import { Spinner } from "@/components/ui/spinner";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
 import { CredentialsWarning } from "@/components/ui/credentials-warning";
+import clsx from "clsx";
 
 interface LogFilters {
   projectId: string;
@@ -23,6 +23,82 @@ interface LogFilters {
 }
 
 const PAGE_SIZE = 25;
+
+const AGENT_STYLES: Record<
+  string,
+  {
+    dot: string;
+    border: string;
+    badge: string;
+  }
+> = {
+  prd_agent: {
+    dot: "bg-emerald-400",
+    border: "border-emerald-500/60",
+    badge: "border border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+  },
+  scaffold_agent: {
+    dot: "bg-sky-400",
+    border: "border-sky-500/60",
+    badge: "border border-sky-500/40 bg-sky-500/10 text-sky-200"
+  },
+  codegen_agent: {
+    dot: "bg-violet-400",
+    border: "border-violet-500/60",
+    badge: "border border-violet-500/40 bg-violet-500/10 text-violet-200"
+  },
+  tester_agent: {
+    dot: "bg-amber-400",
+    border: "border-amber-500/60",
+    badge: "border border-amber-500/40 bg-amber-500/10 text-amber-200"
+  },
+  deploy_agent: {
+    dot: "bg-fuchsia-400",
+    border: "border-fuchsia-500/60",
+    badge: "border border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-200"
+  },
+  depploy_agent: {
+    dot: "bg-fuchsia-400",
+    border: "border-fuchsia-500/60",
+    badge: "border border-fuchsia-500/40 bg-fuchsia-500/10 text-fuchsia-200"
+  },
+  qa_agent: {
+    dot: "bg-rose-400",
+    border: "border-rose-500/60",
+    badge: "border border-rose-500/40 bg-rose-500/10 text-rose-200"
+  }
+};
+
+function getAgentStyle(agent: string | null | undefined) {
+  if (!agent) {
+    return {
+      dot: "bg-slate-500",
+      border: "border-slate-700/50",
+      badge: "border border-slate-600/40 bg-slate-700/20 text-slate-200"
+    };
+  }
+  return (
+    AGENT_STYLES[agent.toLowerCase()] ?? {
+      dot: "bg-slate-500",
+      border: "border-slate-700/50",
+      badge: "border border-slate-600/40 bg-slate-700/20 text-slate-200"
+    }
+  );
+}
+
+function formatDateTimeBr(value: string | null | undefined) {
+  if (!value) {
+    return "—";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString("pt-BR", {
+    timeZone: "America/Sao_Paulo",
+    hour12: false
+  });
+}
 
 export default function LogsPage() {
   const supabaseReady = isSupabaseConfigured;
@@ -50,6 +126,11 @@ export default function LogsPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [inlineSaving, setInlineSaving] = useState<{ id: string; field: EditableField } | null>(
+    null
+  );
+  const [inlineDeletingId, setInlineDeletingId] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
 
   useEffect(() => {
     if (!supabaseReady) {
@@ -110,6 +191,32 @@ export default function LogsPage() {
     setActionError(null);
   }, [activeMessage]);
 
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  function applyMessageUpdate(updated: AgentMessage) {
+    setMessages((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+    setActiveMessage((prev) => (prev?.id === updated.id ? updated : prev));
+  }
+
+  function removeMessageFromState(id: string) {
+    let updatedMessages: AgentMessage[] = [];
+    setMessages((prev) => {
+      updatedMessages = prev.filter((item) => item.id !== id);
+      return updatedMessages;
+    });
+    setCount((prev) => Math.max(0, prev - 1));
+    setActiveMessage((prev) => {
+      if (prev?.id === id) {
+        return updatedMessages[0] ?? null;
+      }
+      return prev;
+    });
+  }
+
   async function handleSaveEdit() {
     if (!activeMessage) return;
     setIsSaving(true);
@@ -133,12 +240,7 @@ export default function LogsPage() {
       return;
     }
 
-    setMessages((prev) =>
-      prev.map((item) =>
-        item.id === data.id ? { ...item, ...data } : item
-      )
-    );
-    setActiveMessage(data);
+    applyMessageUpdate(data);
     setIsEditing(false);
     setIsSaving(false);
   }
@@ -159,13 +261,83 @@ export default function LogsPage() {
       setIsDeleting(false);
       return;
     }
-
-    const remaining = messages.filter((item) => item.id !== activeMessage.id);
-    setMessages(remaining);
-    setCount((prev) => Math.max(0, prev - 1));
-    setActiveMessage(remaining[0] ?? null);
+    removeMessageFromState(activeMessage.id);
 
     setIsDeleting(false);
+  }
+
+  async function handleInlineUpdate(
+    id: string,
+    field: EditableField,
+    rawValue: string
+  ): Promise<void> {
+    const message = messages.find((item) => item.id === id);
+    if (!message) {
+      return;
+    }
+
+    const trimmedValue = field === "message_content" ? rawValue : rawValue.trim();
+
+    const patch: Partial<AgentMessage> = {};
+    switch (field) {
+      case "status": {
+        patch.status = trimmedValue || message.status;
+        break;
+      }
+      case "from_agent": {
+        patch.from_agent = trimmedValue || message.from_agent;
+        break;
+      }
+      case "to_agent": {
+        patch.to_agent = trimmedValue.length ? trimmedValue : null;
+        break;
+      }
+      case "message_content": {
+        patch.message_content = rawValue;
+        break;
+      }
+      default:
+        break;
+    }
+
+    if (Object.keys(patch).length === 0) {
+      return;
+    }
+
+    setInlineSaving({ id, field });
+    setActionError(null);
+    try {
+      const { data, error } = await updateAgentMessage(id, patch);
+      if (error || !data) {
+        throw new Error(error ?? "Falha ao atualizar mensagem.");
+      }
+      applyMessageUpdate(data);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+      throw err;
+    } finally {
+      if (isMountedRef.current) {
+        setInlineSaving(null);
+      }
+    }
+  }
+
+  async function handleInlineDelete(id: string) {
+    setInlineDeletingId(id);
+    setActionError(null);
+    try {
+      const { error } = await deleteAgentMessage(id);
+      if (error) {
+        throw new Error(error);
+      }
+      removeMessageFromState(id);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      if (isMountedRef.current) {
+        setInlineDeletingId(null);
+      }
+    }
   }
 
   if (!supabaseReady) {
@@ -249,39 +421,97 @@ export default function LogsPage() {
           </div>
 
           <div className="flex-1 overflow-auto">
-            <table className="min-w-full divide-y divide-slate-800">
+            <table className="min-w-full table-fixed divide-y divide-slate-800">
               <thead className="bg-slate-900/80 text-xs uppercase text-slate-400">
                 <tr>
-                  <th className="px-4 py-3 text-left">Data</th>
-                  <th className="px-4 py-3 text-left">De</th>
-                  <th className="px-4 py-3 text-left">Para</th>
-                  <th className="px-4 py-3 text-left">Status</th>
+                  <th className="w-36 px-4 py-3 text-left">Data</th>
+                  <th className="w-44 px-4 py-3 text-left">De</th>
+                  <th className="w-44 px-4 py-3 text-left">Para</th>
+                  <th className="w-36 px-4 py-3 text-left">Status</th>
                   <th className="px-4 py-3 text-left">Conteúdo</th>
+                  <th className="w-14 px-3 py-3 text-left">
+                    <span className="sr-only">Ações</span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-900 text-sm">
                 {messages.map((message) => {
                   const isActive = activeMessage?.id === message.id;
+                  const agentStyle = getAgentStyle(message.from_agent);
                   return (
                     <tr
                       key={message.id}
-                      className={`cursor-pointer transition hover:bg-slate-900 ${
-                        isActive ? "bg-slate-900/60" : ""
-                      }`}
+                      className={clsx(
+                        "cursor-pointer border-l-4 border-transparent transition hover:bg-slate-900/50",
+                        isActive ? "bg-slate-900/60" : "",
+                        agentStyle.border
+                      )}
                       onClick={() => setActiveMessage(message)}
                     >
                       <td className="px-4 py-2 text-xs text-slate-400">
-                        {format(new Date(message.created_at), "dd/MM/yyyy HH:mm:ss")}
+                        {formatDateTimeBr(message.created_at)}
                       </td>
-                      <td className="px-4 py-2 font-medium text-white">
-                        {message.from_agent}
-                      </td>
-                      <td className="px-4 py-2 text-slate-300">{message.to_agent ?? "—"}</td>
                       <td className="px-4 py-2">
-                        <StatusBadge status={message.status} />
+                        <div className="flex items-center gap-2">
+                          <span className={clsx("h-2.5 w-2.5 rounded-full", agentStyle.dot)} />
+                          <InlineEditableCell
+                            value={message.from_agent}
+                            placeholder="from_agent"
+                            saving={
+                              inlineSaving?.id === message.id && inlineSaving.field === "from_agent"
+                            }
+                            onSave={(value) => handleInlineUpdate(message.id, "from_agent", value)}
+                          />
+                        </div>
                       </td>
-                      <td className="max-w-xs px-4 py-2 text-xs text-slate-400">
-                        {truncate(message.message_content)}
+                      <td className="px-4 py-2">
+                        <InlineEditableCell
+                          value={message.to_agent}
+                          placeholder="to_agent"
+                          saving={
+                            inlineSaving?.id === message.id && inlineSaving.field === "to_agent"
+                          }
+                          onSave={(value) => handleInlineUpdate(message.id, "to_agent", value)}
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <InlineEditableCell
+                          value={message.status}
+                          placeholder="status"
+                          saving={
+                            inlineSaving?.id === message.id && inlineSaving.field === "status"
+                          }
+                          onSave={(value) => handleInlineUpdate(message.id, "status", value)}
+                        />
+                      </td>
+                      <td className="px-4 py-2 align-top break-words">
+                        <InlineEditableCell
+                          value={message.message_content}
+                          placeholder="conteúdo"
+                          multiline
+                          saving={
+                            inlineSaving?.id === message.id &&
+                            inlineSaving.field === "message_content"
+                          }
+                          onSave={(value) =>
+                            handleInlineUpdate(message.id, "message_content", value)
+                          }
+                        />
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          type="button"
+                          className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-400 transition hover:border-rose-600 hover:text-rose-300 disabled:cursor-not-allowed disabled:border-rose-900 disabled:text-rose-700"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleInlineDelete(message.id);
+                          }}
+                          disabled={inlineDeletingId === message.id}
+                          title="Excluir mensagem"
+                          aria-label="Excluir mensagem"
+                        >
+                          🗑
+                        </button>
                       </td>
                     </tr>
                   );
@@ -374,14 +604,15 @@ function MessageDetails({
     <div className="flex h-full flex-col">
       <div className="border-b border-slate-800 bg-slate-900/60 px-6 py-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
+          <div className="space-y-2">
             <p className="text-sm font-semibold text-white">Detalhes da mensagem</p>
             <p className="text-xs text-slate-400">
-              {format(new Date(message.created_at), "dd/MM/yyyy HH:mm:ss")}
+              {formatDateTimeBr(message.created_at)}
             </p>
             <div className="mt-1">
               <StatusBadge status={message.status} />
             </div>
+            <AgentBadge agent={message.from_agent} />
           </div>
           <div className="flex gap-2">
             <button
@@ -403,7 +634,12 @@ function MessageDetails({
       <div className="flex-1 space-y-6 overflow-auto px-6 py-6 text-sm text-slate-200">
         <div>
           <h3 className="text-xs uppercase tracking-wide text-slate-500">Origem</h3>
-          <p className="text-base font-medium text-white">{message.from_agent}</p>
+          <div className="mt-1 flex items-center gap-2 text-base font-medium text-white">
+            <span>{message.from_agent}</span>
+            <span
+              className={clsx("h-2.5 w-2.5 rounded-full", getAgentStyle(message.from_agent).dot)}
+            />
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-4 text-xs text-slate-400">
           <div>
@@ -590,9 +826,158 @@ function EditContentDialog({
   );
 }
 
-function truncate(value: string | null, length = 60) {
-  if (!value) return "—";
-  if (value.length <= length) return value;
-  return `${value.slice(0, length)}…`;
+type EditableField = "status" | "from_agent" | "to_agent" | "message_content";
+
+interface InlineEditableCellProps {
+  value: string | null;
+  placeholder?: string;
+  multiline?: boolean;
+  saving?: boolean;
+  onSave: (value: string) => Promise<void>;
+}
+
+function InlineEditableCell({
+  value,
+  placeholder,
+  multiline = false,
+  saving = false,
+  onSave
+}: InlineEditableCellProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(value ?? "");
+  const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setDraft(value ?? "");
+    }
+  }, [value, isEditing]);
+
+  useEffect(() => {
+    if (isEditing) {
+      requestAnimationFrame(() => {
+        inputRef.current?.focus();
+        if (inputRef.current instanceof HTMLInputElement) {
+          inputRef.current.select();
+        }
+      });
+    }
+  }, [isEditing]);
+
+  const displayValue = value && value.length ? value : placeholder ?? "—";
+
+  const startEditing = (event: React.MouseEvent) => {
+    if (isEditing || saving) return;
+    event.stopPropagation();
+    setIsEditing(true);
+  };
+
+  const cancelEditing = () => {
+    setDraft(value ?? "");
+    setIsEditing(false);
+  };
+
+  const commit = async () => {
+    if (!isEditing || saving) return;
+    const nextValue = multiline ? draft : draft.trim();
+    const currentValue = value ?? "";
+
+    if (nextValue === currentValue) {
+      setIsEditing(false);
+      return;
+    }
+
+    try {
+      await onSave(nextValue);
+      setIsEditing(false);
+    } catch {
+      setDraft(value ?? "");
+      setIsEditing(true);
+    }
+  };
+
+  const handleBlur = () => {
+    void commit();
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (!multiline && event.key === "Enter") {
+      event.preventDefault();
+      void commit();
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      cancelEditing();
+    }
+    if (multiline && (event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      void commit();
+    }
+  };
+
+  const inputBaseClasses =
+    "w-full rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 focus:border-slate-500 focus:outline-none focus:ring-0 disabled:opacity-60";
+
+  return (
+    <div className="relative">
+      {isEditing ? (
+        multiline ? (
+          <textarea
+            ref={(node) => {
+              inputRef.current = node;
+            }}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            onClick={(event) => event.stopPropagation()}
+            className={`${inputBaseClasses} h-24 resize-none`}
+            disabled={saving}
+          />
+        ) : (
+          <input
+            ref={(node) => {
+              inputRef.current = node;
+            }}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            onClick={(event) => event.stopPropagation()}
+            className={inputBaseClasses}
+            disabled={saving}
+            placeholder={placeholder}
+          />
+        )
+      ) : (
+        <span
+          className={clsx(
+            "block cursor-text text-xs text-slate-300",
+            multiline ? "whitespace-pre-wrap break-words" : "truncate",
+            saving ? "opacity-60" : ""
+          )}
+          onClick={startEditing}
+        >
+          {displayValue}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function AgentBadge({ agent }: { agent: string | null }) {
+  const style = getAgentStyle(agent ?? "");
+  const label = agent ?? "desconhecido";
+
+  return (
+    <span
+      className={clsx(
+        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize",
+        style.badge
+      )}
+    >
+      {label.replace(/_/g, " ")}
+    </span>
+  );
 }
 
