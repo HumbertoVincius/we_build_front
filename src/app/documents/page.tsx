@@ -254,6 +254,7 @@ export default function DocumentsPage() {
               const isActive =
                 selectedDocument &&
                 (selectedDocument as Record<string, unknown>)[config.idKey as string] === id;
+              const summaryMetadata = extractSummaryMetadata(document, activeTab);
 
               return (
                 <div
@@ -281,12 +282,22 @@ export default function DocumentsPage() {
                       <p className="mt-2 line-clamp-2 text-xs text-slate-300">
                         {document.notes ?? document.archetype ?? document.project_id ?? "—"}
                       </p>
+                      {summaryMetadata.length ? (
+                        <div className="mt-2 space-y-1">
+                          {summaryMetadata.map((entry) => (
+                            <p key={entry.label} className="text-[0.7rem] text-slate-400">
+                              <span className="text-slate-500">{entry.label}:</span>{" "}
+                              <span className="text-slate-300">{entry.value}</span>
+                            </p>
+                          ))}
+                        </div>
+                      ) : null}
                     </div>
                     <button
                       type="button"
                       className={clsx(
                         "rounded border px-2 py-1 text-xs font-medium transition",
-                        "border-rose-900 text-rose-200 hover:border-rose-700 hover:text-white",
+                        "border-slate-800 text-slate-400 hover:border-rose-700 hover:text-rose-200",
                         deletingId === id
                           ? "cursor-wait border-rose-950 text-rose-600"
                           : "group-hover:border-rose-700 group-hover:text-white"
@@ -373,11 +384,13 @@ function DocumentMetadata({
   type: DocumentType;
   document: DocumentRecord;
 }) {
+  const [showDetails, setShowDetails] = useState(false);
   const config = DOCUMENT_TYPES[type];
   const id = (document as Record<string, unknown>)[config.idKey as string];
   const createdAt = document.created_at
     ? format(new Date(document.created_at), "dd/MM/yyyy HH:mm:ss")
     : "—";
+  const summaryMetadata = extractSummaryMetadata(document, type);
 
   const baseMetaEntries = [
     { label: "Projeto", value: document.project_id ?? "—" },
@@ -391,31 +404,52 @@ function DocumentMetadata({
     type === "prd" ? extractMetadataParameters(document.content) : [];
 
   return (
-    <div className="border-b border-slate-800 bg-slate-950/80 px-6 py-5">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex-1">
+    <div className="border-b border-slate-800 bg-slate-950/80 px-5 py-4">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="flex-1 space-y-2">
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{config.label}</p>
           <h2 className="text-xl font-semibold text-white break-all">{id as string}</h2>
           {document.notes ? (
-            <p className="mt-2 max-w-2xl text-sm text-slate-300">{document.notes}</p>
+            <p className="max-w-2xl text-sm text-slate-300">{document.notes}</p>
+          ) : null}
+          {summaryMetadata.length ? (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+              {summaryMetadata.map((entry) => (
+                <span key={entry.label} className="flex items-center gap-1">
+                  <span className="text-slate-500">{entry.label}:</span>
+                  <span className="text-slate-200">{entry.value}</span>
+                </span>
+              ))}
+            </div>
           ) : null}
         </div>
-        <div className="text-xs text-slate-400 whitespace-nowrap">Criado em {createdAt}</div>
+        <div className="flex items-center gap-3 self-start text-xs text-slate-400 md:flex-col md:items-end">
+          <span className="whitespace-nowrap">Criado em {createdAt}</span>
+          <button
+            type="button"
+            onClick={() => setShowDetails((prev) => !prev)}
+            className="rounded border border-slate-800 px-3 py-1 text-[0.7rem] font-medium text-slate-300 transition hover:border-slate-600 hover:text-white"
+          >
+            {showDetails ? "Ocultar detalhes" : "Mostrar detalhes"}
+          </button>
+        </div>
       </div>
-      <dl className="mt-4 grid grid-cols-1 gap-4 text-sm text-slate-300 sm:grid-cols-3">
-        {[...baseMetaEntries, ...contentMetadataEntries].map((entry) => (
-          <div key={entry.label}>
-            <dt className="text-xs uppercase tracking-wide text-slate-500">{entry.label}</dt>
-            <dd className="text-white">{entry.value}</dd>
-          </div>
-        ))}
-        {parameterEntries.map((entry) => (
-          <div key={entry.label}>
-            <dt className="text-xs uppercase tracking-wide text-slate-500">{entry.label}</dt>
-            <dd className="text-white">{entry.value}</dd>
-          </div>
-        ))}
-      </dl>
+      {showDetails ? (
+        <dl className="mt-3 grid grid-cols-1 gap-3 text-sm text-slate-300 sm:grid-cols-2 lg:grid-cols-3">
+          {[...baseMetaEntries, ...contentMetadataEntries].map((entry) => (
+            <div key={entry.label}>
+              <dt className="text-xs uppercase tracking-wide text-slate-500">{entry.label}</dt>
+              <dd className="text-white">{entry.value}</dd>
+            </div>
+          ))}
+          {parameterEntries.map((entry) => (
+            <div key={entry.label}>
+              <dt className="text-xs uppercase tracking-wide text-slate-500">{entry.label}</dt>
+              <dd className="text-white">{entry.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
     </div>
   );
 }
@@ -426,6 +460,34 @@ function extractContentMetadataEntries(content: unknown): { label: string; value
   const completionTokens = findCompletionTokens(content);
   if (completionTokens !== null) {
     entries.push({ label: "Completion tokens", value: formatParameterValue(completionTokens) });
+  }
+
+  return entries;
+}
+
+function extractSummaryMetadata(
+  document: DocumentRecord,
+  type: DocumentType
+): { label: string; value: string }[] {
+  const content = document.content;
+  const config = DOCUMENT_TYPES[type];
+  const labelPrefix = config.label;
+  const entries: { label: string; value: string }[] = [];
+
+  const tokens = findTokenUsage(content);
+  if (tokens !== null) {
+    entries.push({
+      label: `${labelPrefix} tokens`,
+      value: formatParameterValue(tokens)
+    });
+  }
+
+  const agentModel = findAgentModel(content);
+  if (agentModel !== null) {
+    entries.push({
+      label: `${labelPrefix} agent model`,
+      value: formatParameterValue(agentModel)
+    });
   }
 
   return entries;
@@ -492,6 +554,67 @@ function findCompletionTokens(content: unknown): unknown {
     ["usage", "completionTokens"],
     ["token_usage", "completion_tokens"],
     ["token_usage", "completionTokens"]
+  ];
+
+  for (const path of candidates) {
+    const value = getNestedValue(metadataRecord, path);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function findTokenUsage(content: unknown): unknown {
+  if (!content || typeof content !== "object") {
+    return null;
+  }
+
+  const metadata = (content as Record<string, unknown>).metadata;
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  const metadataRecord = metadata as Record<string, unknown>;
+  const candidates: Array<string[]> = [
+    ["usage", "total_tokens"],
+    ["usage", "totalTokens"],
+    ["usage", "tokens"],
+    ["token_usage", "total_tokens"],
+    ["token_usage", "totalTokens"],
+    ["token_usage", "tokens"],
+    ["tokens"],
+    ["token"]
+  ];
+
+  for (const path of candidates) {
+    const value = getNestedValue(metadataRecord, path);
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function findAgentModel(content: unknown): unknown {
+  if (!content || typeof content !== "object") {
+    return null;
+  }
+
+  const metadata = (content as Record<string, unknown>).metadata;
+  if (!metadata || typeof metadata !== "object") {
+    return null;
+  }
+
+  const metadataRecord = metadata as Record<string, unknown>;
+  const candidates: Array<string[]> = [
+    ["agent_model"],
+    ["agentModel"],
+    ["model"],
+    ["usage", "model"],
+    ["metadata", "agent_model"]
   ];
 
   for (const path of candidates) {

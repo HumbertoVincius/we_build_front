@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { duotoneDark } from "react-syntax-highlighter/dist/cjs/styles/prism";
 import clsx from "clsx";
+import { guessLanguage } from "@/lib/language";
 
 interface CodegenFile {
   path: string;
@@ -85,42 +86,6 @@ function buildTree(files: CodegenFile[]): TreeNode {
   };
 
   return { ...root, children: sortNodes(root.children) };
-}
-
-function guessLanguage(path: string, explicit?: string) {
-  if (explicit) return explicit;
-  const extension = path.split(".").pop();
-  switch (extension) {
-    case "ts":
-    case "tsx":
-      return "typescript";
-    case "js":
-    case "jsx":
-      return "javascript";
-    case "json":
-      return "json";
-    case "py":
-      return "python";
-    case "rb":
-      return "ruby";
-    case "go":
-      return "go";
-    case "rs":
-      return "rust";
-    case "java":
-      return "java";
-    case "css":
-      return "css";
-    case "md":
-      return "markdown";
-    case "sh":
-      return "bash";
-    case "yml":
-    case "yaml":
-      return "yaml";
-    default:
-      return "text";
-  }
 }
 
 export function CodegenViewer({ payload }: { payload: unknown }) {
