@@ -40,6 +40,7 @@ export interface BaseDocumentRecord {
   revision?: string | null;
   notes: string | null;
   content: unknown;
+  new?: boolean | null;
 }
 
 export interface PRDDocument extends BaseDocumentRecord {

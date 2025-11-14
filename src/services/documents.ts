@@ -111,3 +111,29 @@ export async function deleteDocument(
   return {};
 }
 
+export async function markDocumentOpened(
+  type: DocumentType,
+  id: string
+): Promise<{ data?: DocumentRecord; error?: string }> {
+  if (!isSupabaseConfigured) {
+    return {
+      error:
+        "Supabase credentials are missing. Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+    };
+  }
+
+  const config = DOCUMENT_TYPES[type];
+  const { data, error } = await supabase
+    .from(config.table)
+    .update({ new: false })
+    .eq(config.idKey as string, id)
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return { data: data ?? undefined };
+}
+

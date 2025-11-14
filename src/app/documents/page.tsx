@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DOCUMENT_TYPES } from "@/lib/documentConfig";
 import type { DocumentRecord, DocumentType } from "@/types";
-import { deleteDocument, fetchDocuments } from "@/services/documents";
+import { deleteDocument, fetchDocuments, markDocumentOpened } from "@/services/documents";
 import { JsonViewer } from "@/components/documents/json-viewer";
 import { CodegenViewer, resolveCodegenFiles } from "@/components/documents/codegen-viewer";
 import { format } from "date-fns";
@@ -44,6 +44,7 @@ export default function DocumentsPage() {
   const [collapseSignal, setCollapseSignal] = useState(0);
   const [expandSignal, setExpandSignal] = useState(0);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [markingId, setMarkingId] = useState<string | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const codegenFiles = useMemo(() => {
     if (!selectedDocument) {
@@ -205,6 +206,51 @@ export default function DocumentsPage() {
     setDeletingId(null);
   }
 
+  async function handleMarkAsViewed(document: DocumentRecord) {
+    if (markingId) {
+      return;
+    }
+
+    const config = DOCUMENT_TYPES[activeTab];
+    const documentId = (document as Record<string, unknown>)[config.idKey as string];
+
+    if (!documentId || typeof documentId !== "string") {
+      setError("Não foi possível identificar o documento selecionado.");
+      return;
+    }
+
+    setMarkingId(documentId);
+    setError(null);
+
+    const { data, error: markError } = await markDocumentOpened(activeTab, documentId);
+    if (markError) {
+      setError(`Erro ao marcar documento como visto: ${markError}`);
+      setMarkingId(null);
+      return;
+    }
+
+    setDocuments((prev) =>
+      prev.map((item) => {
+        const currentId = (item as Record<string, unknown>)[config.idKey as string];
+        if (currentId === documentId) {
+          return { ...item, "new": false };
+        }
+        return item;
+      })
+    );
+
+    setSelectedDocument((prev) => {
+      if (!prev) return prev;
+      const currentId = (prev as Record<string, unknown>)[config.idKey as string];
+      if (currentId === documentId) {
+        return { ...prev, "new": false };
+      }
+      return prev;
+    });
+
+    setMarkingId(null);
+  }
+
   useEffect(() => {
     setExpandSignal((prev) => prev + 1);
   }, [selectedDocument, activeTab]);
@@ -307,6 +353,7 @@ export default function DocumentsPage() {
                 selectedDocument &&
                 (selectedDocument as Record<string, unknown>)[config.idKey as string] === id;
               const summaryMetadata = extractSummaryMetadata(document, activeTab);
+              const showNewBadge = activeTab === "scaffold" && document.new;
 
               return (
                 <div
@@ -329,6 +376,11 @@ export default function DocumentsPage() {
                     <div className="flex-1">
                       <p className="text-sm font-semibold text-white">
                         {config.label} {document.revision ?? ""}
+                        {showNewBadge ? (
+                          <span className="ml-2 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-emerald-200">
+                            Novo
+                          </span>
+                        ) : null}
                       </p>
                       <p className="mt-1 text-xs text-slate-400">{createdAt}</p>
                       <p className="mt-2 line-clamp-2 text-xs text-slate-300">
@@ -345,23 +397,44 @@ export default function DocumentsPage() {
                         </div>
                       ) : null}
                     </div>
-                    <button
-                      type="button"
-                      className={clsx(
-                        "rounded border px-2 py-1 text-xs font-medium transition",
-                        "border-slate-800 text-slate-400 hover:border-rose-700 hover:text-rose-200",
-                        deletingId === id
-                          ? "cursor-wait border-rose-950 text-rose-600"
-                          : "group-hover:border-rose-700 group-hover:text-white"
-                      )}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        handleDeleteDocument(document);
-                      }}
-                      disabled={deletingId !== null}
-                    >
-                      {deletingId === id ? "Excluindo…" : "Excluir"}
-                    </button>
+                    <div className="flex flex-col gap-1.5">
+                      {showNewBadge ? (
+                        <button
+                          type="button"
+                          className={clsx(
+                            "rounded border px-2 py-1 text-xs font-medium transition",
+                            "border-amber-500/50 bg-amber-500/10 text-amber-200 hover:border-amber-400 hover:bg-amber-500/20",
+                            markingId === id
+                              ? "cursor-wait border-amber-900 text-amber-600"
+                              : ""
+                          )}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleMarkAsViewed(document);
+                          }}
+                          disabled={markingId !== null}
+                        >
+                          {markingId === id ? "Marcando…" : "Marcar como visto"}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className={clsx(
+                          "rounded border px-2 py-1 text-xs font-medium transition",
+                          "border-slate-800 text-slate-400 hover:border-rose-700 hover:text-rose-200",
+                          deletingId === id
+                            ? "cursor-wait border-rose-950 text-rose-600"
+                            : "group-hover:border-rose-700 group-hover:text-white"
+                        )}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleDeleteDocument(document);
+                        }}
+                        disabled={deletingId !== null}
+                      >
+                        {deletingId === id ? "Excluindo…" : "Excluir"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -380,6 +453,8 @@ export default function DocumentsPage() {
               <DocumentMetadata
                 type={activeTab}
                 document={selectedDocument}
+                onMarkAsViewed={handleMarkAsViewed}
+                markingId={markingId}
               />
               <div className="flex flex-1 flex-col overflow-hidden p-6">
                 <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
@@ -445,10 +520,14 @@ export default function DocumentsPage() {
 
 function DocumentMetadata({
   type,
-  document
+  document,
+  onMarkAsViewed,
+  markingId
 }: {
   type: DocumentType;
   document: DocumentRecord;
+  onMarkAsViewed?: (document: DocumentRecord) => void;
+  markingId?: string | null;
 }) {
   const [showDetails, setShowDetails] = useState(false);
   const config = DOCUMENT_TYPES[type];
@@ -457,6 +536,8 @@ function DocumentMetadata({
     ? format(new Date(document.created_at), "dd/MM/yyyy HH:mm:ss")
     : "—";
   const summaryMetadata = extractSummaryMetadata(document, type);
+  const showMarkAsViewed = type === "scaffold" && document.new && onMarkAsViewed;
+  const documentId = (document as Record<string, unknown>)[config.idKey as string] as string;
 
   const baseMetaEntries = [
     { label: "Projeto", value: document.project_id ?? "—" },
@@ -491,6 +572,16 @@ function DocumentMetadata({
         </div>
         <div className="flex items-center gap-3 self-start text-xs text-slate-400 md:flex-col md:items-end">
           <span className="whitespace-nowrap">Criado em {createdAt}</span>
+          {showMarkAsViewed ? (
+            <button
+              type="button"
+              className="rounded-md border border-amber-500 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-200 transition hover:border-amber-400 hover:text-amber-100 disabled:cursor-not-allowed disabled:border-amber-900 disabled:text-amber-600"
+              onClick={() => onMarkAsViewed(document)}
+              disabled={markingId === documentId}
+            >
+              {markingId === documentId ? "Marcando…" : "Marcar como visto"}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => setShowDetails((prev) => !prev)}
