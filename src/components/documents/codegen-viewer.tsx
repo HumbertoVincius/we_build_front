@@ -89,14 +89,30 @@ function buildTree(files: CodegenFile[]): TreeNode {
   return { ...root, children: sortNodes(root.children) };
 }
 
-export function CodegenViewer({ payload }: { payload: unknown }) {
-  const files = useMemo(() => resolveCodegenFiles(payload), [payload]);
+interface CodegenViewerProps {
+  payload: unknown;
+  files?: CodegenFile[];
+}
+
+export function CodegenViewer({ payload, files: providedFiles }: CodegenViewerProps) {
+  const files = useMemo(
+    () => (providedFiles ? providedFiles : resolveCodegenFiles(payload)),
+    [payload, providedFiles]
+  );
   const tree = useMemo(() => buildTree(files), [files]);
   const [activePath, setActivePath] = useState<string | null>(
     files.length ? files[0].path : null
   );
+  const [collapsedPaths, setCollapsedPaths] = useState<Record<string, boolean>>({});
 
   const activeFile = files.find((file) => file.path === activePath) ?? files[0];
+
+  const toggleCollapse = (path: string) => {
+    setCollapsedPaths((prev) => ({
+      ...prev,
+      [path]: !prev[path]
+    }));
+  };
 
   if (!files.length) {
     return (
@@ -113,6 +129,8 @@ export function CodegenViewer({ payload }: { payload: unknown }) {
           node={tree}
           activePath={activePath}
           onSelect={(path) => setActivePath(path)}
+          collapsedPaths={collapsedPaths}
+          onToggleCollapse={toggleCollapse}
         />
       </div>
       <div className="flex-1 overflow-auto">
@@ -140,7 +158,10 @@ export function CodegenViewer({ payload }: { payload: unknown }) {
   );
 }
 
-export function resolveCodegenFiles(payload: unknown): CodegenFile[] {
+export function resolveCodegenFiles(
+  payload: unknown,
+  visited: WeakSet<object> = new WeakSet()
+): CodegenFile[] {
   const toCodegenFile = (entry: unknown): CodegenFile | null => {
     if (!entry || typeof entry !== "object") return null;
     const candidate = entry as Record<string, unknown>;
@@ -164,47 +185,87 @@ export function resolveCodegenFiles(payload: unknown): CodegenFile[] {
   const normalizeArray = (entries: unknown[]): CodegenFile[] =>
     entries.map(toCodegenFile).filter(Boolean) as CodegenFile[];
 
-  if (Array.isArray(payload)) {
-    return normalizeArray(payload);
+  if (typeof payload === "string") {
+    try {
+      const parsed = JSON.parse(payload);
+      return resolveCodegenFiles(parsed, visited);
+    } catch {
+      return [];
+    }
   }
 
   if (!payload || typeof payload !== "object") {
     return [];
   }
 
+  if (visited.has(payload as object)) {
+    return [];
+  }
+  visited.add(payload as object);
+
+  if (Array.isArray(payload)) {
+    return normalizeArray(payload);
+  }
+
   const record = payload as Record<string, unknown>;
 
-  if (Array.isArray(record.files)) {
-    const files = normalizeArray(record.files);
-    if (files.length) {
-      return files;
+  // Collect all files_* arrays (for scaffold documents)
+  const allFiles: CodegenFile[] = [];
+  for (const key in record) {
+    if (key.startsWith("files_") && Array.isArray(record[key])) {
+      const files = normalizeArray(record[key] as unknown[]);
+      allFiles.push(...files);
+    }
+  }
+  if (allFiles.length) {
+    return allFiles;
+  }
+
+  const candidateKeys = ["files", "content", "artifacts", "entries", "bundle"];
+
+  for (const key of candidateKeys) {
+    const candidate = record[key];
+    if (Array.isArray(candidate)) {
+      const files = normalizeArray(candidate);
+      if (files.length) return files;
     }
   }
 
-  if (Array.isArray(record.content)) {
-    const files = normalizeArray(record.content);
-    if (files.length) {
-      return files;
+  const nestedKeys = ["content", "payload", "data", "result", "bundle"];
+  for (const key of nestedKeys) {
+    const value = record[key];
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      // First check for files_* arrays in nested objects (for scaffold)
+      const nestedRecord = value as Record<string, unknown>;
+      const nestedFiles: CodegenFile[] = [];
+      for (const nestedKey in nestedRecord) {
+        if (nestedKey.startsWith("files_") && Array.isArray(nestedRecord[nestedKey])) {
+          const files = normalizeArray(nestedRecord[nestedKey] as unknown[]);
+          nestedFiles.push(...files);
+        }
+      }
+      if (nestedFiles.length) {
+        return nestedFiles;
+      }
+      // Then do recursive search
+      const files = resolveCodegenFiles(value, visited);
+      if (files.length) return files;
     }
   }
 
   const single = toCodegenFile(record);
-  if (single) {
-    return [single];
-  }
-
-  return [];
+  return single ? [single] : [];
 }
 
-function Tree({
-  node,
-  activePath,
-  onSelect
-}: {
+interface TreeProps {
   node: TreeNode;
   activePath: string | null;
   onSelect: (path: string) => void;
-}) {
+  collapsedPaths: Record<string, boolean>;
+  onToggleCollapse: (path: string) => void;
+}
+
+function Tree({ node, activePath, onSelect, collapsedPaths, onToggleCollapse }: TreeProps) {
   if (node.type === "file") {
     const isActive = node.path === activePath;
     return (
@@ -223,19 +284,35 @@ function Tree({
     );
   }
 
+  const pathKey = node.path || `dir-${node.name}`;
+  const isCollapsed = Boolean(collapsedPaths[pathKey]);
+
   return (
     <div className="text-xs text-slate-300">
       {node.path ? (
-        <div className="flex items-center gap-2 px-4 py-1.5 text-slate-400">
-          <span>📁</span>
+        <button
+          type="button"
+          onClick={() => onToggleCollapse(pathKey)}
+          className="flex w-full items-center gap-2 px-4 py-1.5 text-left text-slate-400 hover:bg-slate-900/40"
+        >
+          <span className="text-slate-500">{isCollapsed ? "▸" : "▾"}</span>
           <span className="font-medium">{node.name}</span>
+        </button>
+      ) : null}
+      {!isCollapsed ? (
+        <div className="pl-3">
+          {node.children.map((child) => (
+            <Tree
+              key={`${child.path}-${child.name}`}
+              node={child}
+              activePath={activePath}
+              onSelect={onSelect}
+              collapsedPaths={collapsedPaths}
+              onToggleCollapse={onToggleCollapse}
+            />
+          ))}
         </div>
       ) : null}
-      <div className="pl-3">
-        {node.children.map((child) => (
-          <Tree key={`${child.path}-${child.name}`} node={child} activePath={activePath} onSelect={onSelect} />
-        ))}
-      </div>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import type { DocumentRecord, DocumentType } from "@/types";
 import { deleteDocument, fetchDocuments, markDocumentOpened } from "@/services/documents";
 import { JsonViewer } from "@/components/documents/json-viewer";
 import { CodegenViewer, resolveCodegenFiles } from "@/components/documents/codegen-viewer";
+import { SchemaViewer } from "@/components/documents/schema-viewer";
 import { format } from "date-fns";
 import clsx from "clsx";
 import { Spinner } from "@/components/ui/spinner";
@@ -46,7 +47,7 @@ export default function DocumentsPage() {
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const codegenFiles = useMemo(() => {
+  const documentFiles = useMemo(() => {
     if (!selectedDocument) {
       return [];
     }
@@ -57,8 +58,19 @@ export default function DocumentsPage() {
     }
   }, [selectedDocument]);
   const shouldUseCodeViewer = Boolean(
-    selectedDocument && (activeTab === "codegen" || codegenFiles.length > 0)
+    selectedDocument &&
+      (activeTab === "codegen" ||
+        activeTab === "scaffold" ||
+        documentFiles.length > 0)
   );
+  const shouldUseSchemaViewer = Boolean(selectedDocument && activeTab === "schema");
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && selectedDocument) {
+      (window as typeof window & { __lastCodegenDocument?: DocumentRecord }).__lastCodegenDocument =
+        selectedDocument;
+    }
+  }, [selectedDocument]);
 
   useEffect(() => {
     if (!supabaseReady) {
@@ -343,21 +355,22 @@ export default function DocumentsPage() {
                 <Spinner label="Carregando documentos…" />
               </div>
             ) : null}
-            {documents.map((document) => {
+            {documents.map((document, index) => {
               const config = DOCUMENT_TYPES[activeTab];
               const id = (document as Record<string, unknown>)[config.idKey as string];
               const createdAt = document.created_at
                 ? format(new Date(document.created_at), "dd/MM/yyyy HH:mm")
                 : "—";
+              const rowKey = typeof id === "string" ? id : `document-${index}`;
               const isActive =
                 selectedDocument &&
                 (selectedDocument as Record<string, unknown>)[config.idKey as string] === id;
               const summaryMetadata = extractSummaryMetadata(document, activeTab);
-              const showNewBadge = activeTab === "scaffold" && document.new;
+              const showNewBadge = Boolean(document.new);
 
               return (
                 <div
-                  key={id as string}
+                  key={rowKey}
                   className={clsx(
                     "group border-b border-slate-900 px-4 py-3 text-left transition cursor-pointer",
                     isActive ? "bg-slate-800/80 text-white" : "hover:bg-slate-900/40"
@@ -388,8 +401,8 @@ export default function DocumentsPage() {
                       </p>
                       {summaryMetadata.length ? (
                         <div className="mt-2 space-y-1">
-                          {summaryMetadata.map((entry) => (
-                            <p key={entry.label} className="text-[0.7rem] text-slate-400">
+                          {summaryMetadata.map((entry, index) => (
+                            <p key={`${entry.label}-${index}`} className="text-[0.7rem] text-slate-400">
                               <span className="text-slate-500">{entry.label}:</span>{" "}
                               <span className="text-slate-300">{entry.value}</span>
                             </p>
@@ -487,8 +500,10 @@ export default function DocumentsPage() {
                     <span className="text-xs text-emerald-300">{copyFeedback}</span>
                   ) : null}
                 </div>
-                {shouldUseCodeViewer ? (
-                  <CodegenViewer payload={selectedDocument.content} />
+                {shouldUseSchemaViewer ? (
+                  <SchemaViewer payload={selectedDocument.content} />
+                ) : shouldUseCodeViewer ? (
+                  <CodegenViewer payload={selectedDocument.content} files={documentFiles} />
                 ) : (
                   <div className="flex-1 overflow-auto rounded-lg border border-slate-800 bg-slate-950/60 p-4">
                     <JsonViewer
@@ -536,7 +551,7 @@ function DocumentMetadata({
     ? format(new Date(document.created_at), "dd/MM/yyyy HH:mm:ss")
     : "—";
   const summaryMetadata = extractSummaryMetadata(document, type);
-  const showMarkAsViewed = type === "scaffold" && document.new && onMarkAsViewed;
+  const showMarkAsViewed = Boolean(document.new && onMarkAsViewed);
   const documentId = (document as Record<string, unknown>)[config.idKey as string] as string;
 
   const baseMetaEntries = [
@@ -555,14 +570,21 @@ function DocumentMetadata({
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="flex-1 space-y-2">
           <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{config.label}</p>
-          <h2 className="text-xl font-semibold text-white break-all">{id as string}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-semibold text-white break-all">{id as string}</h2>
+            {document.new ? (
+              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-emerald-200">
+                Novo
+              </span>
+            ) : null}
+          </div>
           {document.notes ? (
             <p className="max-w-2xl text-sm text-slate-300">{document.notes}</p>
           ) : null}
           {summaryMetadata.length ? (
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
-              {summaryMetadata.map((entry) => (
-                <span key={entry.label} className="flex items-center gap-1">
+              {summaryMetadata.map((entry, index) => (
+                <span key={`${entry.label}-${index}`} className="flex items-center gap-1">
                   <span className="text-slate-500">{entry.label}:</span>
                   <span className="text-slate-200">{entry.value}</span>
                 </span>
@@ -593,14 +615,14 @@ function DocumentMetadata({
       </div>
       {showDetails ? (
         <dl className="mt-3 grid grid-cols-1 gap-3 text-sm text-slate-300 sm:grid-cols-2 lg:grid-cols-3">
-          {[...baseMetaEntries, ...contentMetadataEntries].map((entry) => (
-            <div key={entry.label}>
+          {[...baseMetaEntries, ...contentMetadataEntries].map((entry, index) => (
+            <div key={`${entry.label}-${index}`}>
               <dt className="text-xs uppercase tracking-wide text-slate-500">{entry.label}</dt>
               <dd className="text-white">{entry.value}</dd>
             </div>
           ))}
-          {parameterEntries.map((entry) => (
-            <div key={entry.label}>
+        {parameterEntries.map((entry, index) => (
+          <div key={`${entry.label}-${index}`}>
               <dt className="text-xs uppercase tracking-wide text-slate-500">{entry.label}</dt>
               <dd className="text-white">{entry.value}</dd>
             </div>

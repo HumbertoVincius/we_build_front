@@ -26,6 +26,7 @@ export interface AgentMessage {
 export type DocumentType =
   | "prd"
   | "scaffold"
+  | "schema"
   | "codegen"
   | "tester"
   | "deploy"
@@ -51,6 +52,10 @@ export interface ScaffoldDocument extends BaseDocumentRecord {
   scaffold_id: string;
 }
 
+export interface SchemaDocument extends BaseDocumentRecord {
+  schema_id: string;
+}
+
 export interface CodegenDocument extends BaseDocumentRecord {
   codegen_id: string;
 }
@@ -70,6 +75,7 @@ export interface QADocument extends BaseDocumentRecord {
 export type DocumentRecord =
   | PRDDocument
   | ScaffoldDocument
+  | SchemaDocument
   | CodegenDocument
   | TesterDocument
   | DeployDocument
