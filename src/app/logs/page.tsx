@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   deleteAgentMessage,
   fetchAgentMessages,
@@ -9,6 +10,7 @@ import {
 import type { AgentMessage } from "@/types";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Spinner } from "@/components/ui/spinner";
+import { RefreshButton } from "@/components/ui/refresh-button";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
 import { CredentialsWarning } from "@/components/ui/credentials-warning";
 import clsx from "clsx";
@@ -96,8 +98,50 @@ function formatDateTimeBr(value: string | null | undefined) {
   }
   return date.toLocaleString("pt-BR", {
     timeZone: "America/Sao_Paulo",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
     hour12: false
   });
+}
+
+function calculateDuration(
+  createdAt: string | null | undefined,
+  updatedAt: string | null | undefined
+): string {
+  if (!createdAt) {
+    return "—";
+  }
+
+  try {
+    const start = new Date(createdAt);
+    // Se updated_at não existe ou é null, usa a data atual
+    const end = updatedAt ? new Date(updatedAt) : new Date();
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+      return "—";
+    }
+
+    const diffMs = end.getTime() - start.getTime();
+    
+    // Se a diferença for negativa ou zero, retorna 00:00:00
+    if (diffMs <= 0) {
+      return "00:00:00";
+    }
+
+    const totalSeconds = Math.floor(diffMs / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  } catch (error) {
+    console.error("Error calculating duration:", error, { createdAt, updatedAt });
+    return "—";
+  }
 }
 
 export default function LogsPage() {
@@ -131,6 +175,7 @@ export default function LogsPage() {
   );
   const [inlineDeletingId, setInlineDeletingId] = useState<string | null>(null);
   const isMountedRef = useRef(true);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   useEffect(() => {
     if (!supabaseReady) {
@@ -153,6 +198,15 @@ export default function LogsPage() {
       });
 
       if (!ignore) {
+        // Debug: verificar dados de duração
+        if (data.length > 0) {
+          console.log("Sample message data:", {
+            id: data[0].id,
+            created_at: data[0].created_at,
+            updated_at: data[0].updated_at,
+            duration: calculateDuration(data[0].created_at, data[0].updated_at ?? null)
+          });
+        }
         setMessages(data);
         setCount(total);
         setActiveMessage((prev) =>
@@ -169,7 +223,12 @@ export default function LogsPage() {
     return () => {
       ignore = true;
     };
-  }, [filters, page, supabaseReady]);
+  }, [filters, page, supabaseReady, refreshTrigger]);
+
+  // Refresh handler - force reload by creating a refresh trigger
+  const handleRefresh = async () => {
+    setRefreshTrigger((prev) => prev + 1);
+  };
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(count / PAGE_SIZE)),
@@ -428,6 +487,7 @@ export default function LogsPage() {
                   <th className="w-44 px-4 py-3 text-left">De</th>
                   <th className="w-44 px-4 py-3 text-left">Para</th>
                   <th className="w-36 px-4 py-3 text-left">Status</th>
+                  <th className="w-24 px-4 py-3 text-left">Duração</th>
                   <th className="px-4 py-3 text-left">Conteúdo</th>
                   <th className="w-14 px-3 py-3 text-left">
                     <span className="sr-only">Ações</span>
@@ -478,17 +538,20 @@ export default function LogsPage() {
                         <InlineEditableCell
                           value={message.status}
                           placeholder="status"
+                          fieldType="status"
                           saving={
                             inlineSaving?.id === message.id && inlineSaving.field === "status"
                           }
                           onSave={(value) => handleInlineUpdate(message.id, "status", value)}
                         />
                       </td>
-                      <td className="px-4 py-2 align-top break-words">
+                      <td className="px-4 py-2 text-xs text-slate-400 font-mono">
+                        {calculateDuration(message.created_at, message.updated_at ?? null)}
+                      </td>
+                      <td className="px-4 py-2 break-words">
                         <InlineEditableCell
                           value={message.message_content}
                           placeholder="conteúdo"
-                          multiline
                           saving={
                             inlineSaving?.id === message.id &&
                             inlineSaving.field === "message_content"
@@ -516,16 +579,16 @@ export default function LogsPage() {
                     </tr>
                   );
                 })}
-                {!isLoading && messages.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={4}
-                      className="px-4 py-6 text-center text-sm text-slate-500"
-                    >
-                      Nenhuma mensagem encontrada para os filtros atuais.
-                    </td>
-                  </tr>
-                ) : null}
+                 {!isLoading && messages.length === 0 ? (
+                   <tr>
+                     <td
+                       colSpan={7}
+                       className="px-4 py-6 text-center text-sm text-slate-500"
+                     >
+                       Nenhuma mensagem encontrada para os filtros atuais.
+                     </td>
+                   </tr>
+                 ) : null}
               </tbody>
             </table>
             {isLoading ? (
@@ -583,6 +646,8 @@ export default function LogsPage() {
           error={actionError}
         />
       ) : null}
+      
+      <RefreshButton onRefresh={handleRefresh} isLoading={isLoading} />
     </div>
   );
 }
@@ -633,48 +698,92 @@ function MessageDetails({
       </div>
       <div className="flex-1 space-y-6 overflow-auto px-6 py-6 text-sm text-slate-200">
         <div>
-          <h3 className="text-xs uppercase tracking-wide text-slate-500">Origem</h3>
-          <div className="mt-1 flex items-center gap-2 text-base font-medium text-white">
-            <span>{message.from_agent}</span>
+          <h3 className="text-xs uppercase tracking-wide text-slate-500 break-words overflow-wrap-anywhere">Origem</h3>
+          <div className="mt-1 flex items-center gap-2 text-base font-medium text-white break-words overflow-wrap-anywhere">
+            <span className="break-words overflow-wrap-anywhere">{message.from_agent}</span>
             <span
-              className={clsx("h-2.5 w-2.5 rounded-full", getAgentStyle(message.from_agent).dot)}
+              className={clsx("h-2.5 w-2.5 rounded-full flex-shrink-0", getAgentStyle(message.from_agent).dot)}
             />
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4 text-xs text-slate-400">
           <div>
-            <span className="block uppercase tracking-wide text-slate-500">Destinatário</span>
-            <span className="text-sm text-white">{message.to_agent ?? "—"}</span>
+            <span className="block uppercase tracking-wide text-slate-500 break-words overflow-wrap-anywhere">Destinatário</span>
+            <span className="text-sm text-white break-words overflow-wrap-anywhere">{message.to_agent ?? "—"}</span>
           </div>
           <div>
-            <span className="block uppercase tracking-wide text-slate-500">Status</span>
-            <span className="text-sm text-white capitalize">{message.status}</span>
+            <span className="block uppercase tracking-wide text-slate-500 break-words overflow-wrap-anywhere">Status</span>
+            <span className={clsx("text-sm capitalize font-semibold break-words overflow-wrap-anywhere", getStatusColor(message.status))}>
+              {message.status}
+            </span>
           </div>
           <div>
-            <span className="block uppercase tracking-wide text-slate-500">Projeto</span>
-            <span className="text-sm text-white">{message.project_id ?? "—"}</span>
+            <span className="block uppercase tracking-wide text-slate-500 break-words overflow-wrap-anywhere">Projeto</span>
+            <span className="text-sm text-white break-words overflow-wrap-anywhere">{message.project_id ?? "—"}</span>
           </div>
           <div>
-            <span className="block uppercase tracking-wide text-slate-500">Sessão</span>
-            <span className="text-sm text-white">{message.session_id ?? "—"}</span>
+            <span className="block uppercase tracking-wide text-slate-500 break-words overflow-wrap-anywhere">Sessão</span>
+            <span className="text-sm text-white break-words overflow-wrap-anywhere">{message.session_id ?? "—"}</span>
+          </div>
+          <div>
+            <span className="block uppercase tracking-wide text-slate-500 break-words overflow-wrap-anywhere">Duração</span>
+            <span className="text-sm font-mono text-slate-200 break-words overflow-wrap-anywhere">
+              {calculateDuration(message.created_at, message.updated_at ?? null)}
+            </span>
           </div>
         </div>
         <div>
-          <h3 className="text-xs uppercase tracking-wide text-slate-500">Conteúdo</h3>
-          <pre className="mt-2 max-h-72 overflow-auto rounded-md border border-slate-800 bg-slate-950/60 p-4 text-xs text-slate-100">
+          <h3 className="text-xs uppercase tracking-wide text-slate-500 break-words overflow-wrap-anywhere">Conteúdo</h3>
+          <pre className="mt-2 max-h-72 overflow-auto rounded-md border border-slate-800 bg-slate-950/60 p-4 text-xs text-slate-100 break-words overflow-wrap-anywhere whitespace-pre-wrap">
             {message.message_content ?? "—"}
           </pre>
         </div>
         <div className="grid grid-cols-2 gap-4 text-xs text-slate-500">
-          <MetadataItem label="PRD" value={message.prd_id} />
-          <MetadataItem label="Scaffold" value={message.scaffold_id} />
-          <MetadataItem label="Codegen" value={message.codegen_id} />
-          <MetadataItem label="Tester" value={message.tester_id} />
-          <MetadataItem label="Deploy" value={message.deploy_id} />
-          <MetadataItem label="QA" value={message.qa_id} />
+          <MetadataItem 
+            label="PRD" 
+            value={message.prd_id} 
+            documentType="prd"
+            fromAgent={message.from_agent}
+            toAgent={message.to_agent}
+          />
+          <MetadataItem 
+            label="Scaffold" 
+            value={message.scaffold_id} 
+            documentType="scaffold"
+            fromAgent={message.from_agent}
+            toAgent={message.to_agent}
+          />
+          <MetadataItem 
+            label="Codegen" 
+            value={message.codegen_id} 
+            documentType="codegen"
+            fromAgent={message.from_agent}
+            toAgent={message.to_agent}
+          />
+          <MetadataItem 
+            label="Tester" 
+            value={message.tester_id} 
+            documentType="tester"
+            fromAgent={message.from_agent}
+            toAgent={message.to_agent}
+          />
+          <MetadataItem 
+            label="Deploy" 
+            value={message.deploy_id} 
+            documentType="deploy"
+            fromAgent={message.from_agent}
+            toAgent={message.to_agent}
+          />
+          <MetadataItem 
+            label="QA" 
+            value={message.qa_id} 
+            documentType="qa"
+            fromAgent={message.from_agent}
+            toAgent={message.to_agent}
+          />
         </div>
         {actionError ? (
-          <div className="rounded-md border border-rose-900 bg-rose-950/30 px-4 py-3 text-xs text-rose-200">
+          <div className="rounded-md border border-rose-900 bg-rose-950/30 px-4 py-3 text-xs text-rose-200 break-words overflow-wrap-anywhere">
             {actionError}
           </div>
         ) : null}
@@ -683,11 +792,68 @@ function MessageDetails({
   );
 }
 
-function MetadataItem({ label, value }: { label: string; value: string | null }) {
+function MetadataItem({ 
+  label, 
+  value, 
+  documentType,
+  fromAgent,
+  toAgent
+}: { 
+  label: string; 
+  value: string | null;
+  documentType: "prd" | "scaffold" | "schema" | "codegen" | "tester" | "deploy" | "qa";
+  fromAgent: string | null;
+  toAgent: string | null;
+}) {
+  const router = useRouter();
+  
+  // Check if this document type matches the from_agent
+  const agentToDocType: Record<string, string> = {
+    "prd_agent": "prd",
+    "scaffold_agent": "scaffold",
+    "schema_agent": "schema",
+    "codegen_agent": "codegen",
+    "tester_agent": "tester",
+    "deploy_agent": "deploy",
+    "depploy_agent": "deploy",
+    "qa_agent": "qa"
+  };
+  
+  const isFromThisAgent = fromAgent && agentToDocType[fromAgent.toLowerCase()] === documentType;
+  
+  // For tester messages, determine color based on destination
+  let testerColorClass = "";
+  if (documentType === "tester" && isFromThisAgent && toAgent) {
+    const toAgentLower = toAgent.toLowerCase();
+    if (toAgentLower === "deploy_agent" || toAgentLower === "depploy_agent") {
+      testerColorClass = "border-emerald-500/50 bg-emerald-500/10 text-emerald-200";
+    } else if (toAgentLower === "codegen_agent") {
+      testerColorClass = "border-rose-500/50 bg-rose-500/10 text-rose-200";
+    }
+  }
+  
+  const handleNavigate = () => {
+    if (value) {
+      router.push(`/documents?type=${documentType}&id=${value}`);
+    }
+  };
+  
   return (
     <div>
-      <span className="block uppercase tracking-wide text-slate-500">{label}</span>
-      <span className="text-sm text-white">{value ?? "—"}</span>
+      <span className="block uppercase tracking-wide text-slate-500 break-words overflow-wrap-anywhere">{label}</span>
+      {value ? (
+        <button
+          onClick={handleNavigate}
+          className={clsx(
+            "mt-1 rounded border px-2 py-1 text-xs font-medium transition hover:opacity-80 break-words overflow-wrap-anywhere whitespace-normal",
+            testerColorClass || "border-slate-700 bg-slate-800/40 text-slate-200 hover:border-slate-600 hover:bg-slate-800/60"
+          )}
+        >
+          Ver documento
+        </button>
+      ) : (
+        <span className="text-sm text-white break-words overflow-wrap-anywhere">—</span>
+      )}
     </div>
   );
 }
@@ -828,12 +994,22 @@ function EditContentDialog({
 
 type EditableField = "status" | "from_agent" | "to_agent" | "message_content";
 
+function getStatusColor(status: string | null): string {
+  if (!status) return "text-slate-300";
+  const normalized = status.toLowerCase();
+  if (normalized === "pending") return "text-rose-300 font-semibold";
+  if (normalized === "working" || normalized === "running") return "text-amber-300 font-semibold";
+  if (normalized === "done" || normalized === "completed") return "text-emerald-300 font-semibold";
+  return "text-slate-300";
+}
+
 interface InlineEditableCellProps {
   value: string | null;
   placeholder?: string;
   multiline?: boolean;
   saving?: boolean;
   onSave: (value: string) => Promise<void>;
+  fieldType?: "status" | "default";
 }
 
 function InlineEditableCell({
@@ -841,7 +1017,8 @@ function InlineEditableCell({
   placeholder,
   multiline = false,
   saving = false,
-  onSave
+  onSave,
+  fieldType = "default"
 }: InlineEditableCellProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? "");
@@ -952,8 +1129,9 @@ function InlineEditableCell({
       ) : (
         <span
           className={clsx(
-            "block cursor-text text-xs text-slate-300",
-            multiline ? "whitespace-pre-wrap break-words" : "truncate",
+            "block cursor-text text-xs",
+            fieldType === "status" ? getStatusColor(value) : "text-slate-300",
+            multiline ? "whitespace-pre-wrap break-words overflow-wrap-anywhere" : "break-words overflow-wrap-anywhere",
             saving ? "opacity-60" : ""
           )}
           onClick={startEditing}
@@ -972,7 +1150,7 @@ function AgentBadge({ agent }: { agent: string | null }) {
   return (
     <span
       className={clsx(
-        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize",
+        "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium capitalize break-words overflow-wrap-anywhere",
         style.badge
       )}
     >

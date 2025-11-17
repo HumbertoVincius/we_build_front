@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { DOCUMENT_TYPES } from "@/lib/documentConfig";
 import type { DocumentRecord, DocumentType } from "@/types";
 import { deleteDocument, fetchDocuments, markDocumentOpened } from "@/services/documents";
@@ -10,6 +11,7 @@ import { SchemaViewer } from "@/components/documents/schema-viewer";
 import { format } from "date-fns";
 import clsx from "clsx";
 import { Spinner } from "@/components/ui/spinner";
+import { RefreshButton } from "@/components/ui/refresh-button";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
 import { CredentialsWarning } from "@/components/ui/credentials-warning";
 
@@ -28,8 +30,18 @@ const tabs = Object.entries(DOCUMENT_TYPES).map(([key, value]) => ({
 const PAGE_SIZE = 20;
 
 export default function DocumentsPage() {
+  const searchParams = useSearchParams();
   const supabaseReady = isSupabaseConfigured;
-  const [activeTab, setActiveTab] = useState<DocumentType>("prd");
+  
+  // Read query params for navigation from logs
+  const queryType = searchParams.get("type");
+  const queryId = searchParams.get("id");
+  
+  const [activeTab, setActiveTab] = useState<DocumentType>(
+    (queryType && Object.keys(DOCUMENT_TYPES).includes(queryType)) 
+      ? (queryType as DocumentType) 
+      : "prd"
+  );
   const [filters, setFilters] = useState<DocumentFilters>({
     projectId: "",
     search: "",
@@ -47,6 +59,8 @@ export default function DocumentsPage() {
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
   const [markingId, setMarkingId] = useState<string | null>(null);
   const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queryIdRef = useRef<string | null>(queryId);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const documentFiles = useMemo(() => {
     if (!selectedDocument) {
       return [];
@@ -92,15 +106,31 @@ export default function DocumentsPage() {
       if (!ignore) {
         setDocuments(data);
         setTotal(count);
-        setSelectedDocument((prev) => {
-          if (!prev) return data[0] ?? null;
+        
+        // If we have a query ID, try to find and select that document
+        if (queryIdRef.current) {
           const config = DOCUMENT_TYPES[activeTab];
-          const currentId = (prev as Record<string, unknown>)[config.idKey as string];
-          return data.find((doc) => {
+          const foundDoc = data.find((doc) => {
             const docId = (doc as Record<string, unknown>)[config.idKey as string];
-            return docId === currentId;
-          }) ?? data[0] ?? null;
-        });
+            return docId === queryIdRef.current;
+          });
+          if (foundDoc) {
+            setSelectedDocument(foundDoc);
+            queryIdRef.current = null; // Clear after use
+          } else {
+            setSelectedDocument(data[0] ?? null);
+          }
+        } else {
+          setSelectedDocument((prev) => {
+            if (!prev) return data[0] ?? null;
+            const config = DOCUMENT_TYPES[activeTab];
+            const currentId = (prev as Record<string, unknown>)[config.idKey as string];
+            return data.find((doc) => {
+              const docId = (doc as Record<string, unknown>)[config.idKey as string];
+              return docId === currentId;
+            }) ?? data[0] ?? null;
+          });
+        }
 
         if (message) {
           setError(message);
@@ -113,7 +143,12 @@ export default function DocumentsPage() {
     return () => {
       ignore = true;
     };
-  }, [activeTab, filters, page, supabaseReady]);
+  }, [activeTab, filters, page, supabaseReady, refreshTrigger]);
+
+  // Refresh handler - force reload by creating a refresh trigger
+  const handleRefresh = async () => {
+    setRefreshTrigger((prev) => prev + 1);
+  };
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(total / PAGE_SIZE)),
@@ -325,8 +360,8 @@ export default function DocumentsPage() {
         </select>
       </div>
 
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="flex w-full flex-col border-r border-slate-800 bg-slate-950/40 lg:w-80">
+      <div className="flex flex-1 overflow-hidden min-w-0">
+        <aside className="flex w-full flex-col border-r border-slate-800 bg-slate-950/40 lg:w-80 min-w-0">
           <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3 text-xs text-slate-400">
             <span>{isLoading ? "Carregando…" : `${total} documentos`}</span>
             <span>
@@ -387,7 +422,7 @@ export default function DocumentsPage() {
                 >
                   <div className="flex items-start gap-3">
                     <div className="flex-1">
-                      <p className="text-sm font-semibold text-white">
+                      <p className="text-sm font-semibold text-white break-words overflow-wrap-anywhere">
                         {config.label} {document.revision ?? ""}
                         {showNewBadge ? (
                           <span className="ml-2 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-emerald-200">
@@ -395,14 +430,14 @@ export default function DocumentsPage() {
                           </span>
                         ) : null}
                       </p>
-                      <p className="mt-1 text-xs text-slate-400">{createdAt}</p>
-                      <p className="mt-2 line-clamp-2 text-xs text-slate-300">
+                      <p className="mt-1 text-xs text-slate-400 break-words overflow-wrap-anywhere">{createdAt}</p>
+                      <p className="mt-2 line-clamp-2 text-xs text-slate-300 break-words overflow-wrap-anywhere">
                         {document.notes ?? document.archetype ?? document.project_id ?? "—"}
                       </p>
                       {summaryMetadata.length ? (
                         <div className="mt-2 space-y-1">
                           {summaryMetadata.map((entry, index) => (
-                            <p key={`${entry.label}-${index}`} className="text-[0.7rem] text-slate-400">
+                            <p key={`${entry.label}-${index}`} className="text-[0.7rem] text-slate-400 break-words overflow-wrap-anywhere">
                               <span className="text-slate-500">{entry.label}:</span>{" "}
                               <span className="text-slate-300">{entry.value}</span>
                             </p>
@@ -460,7 +495,7 @@ export default function DocumentsPage() {
           </div>
         </aside>
 
-        <section className="flex flex-1 flex-col overflow-hidden">
+        <section className="flex flex-1 flex-col overflow-x-hidden min-w-0">
           {selectedDocument ? (
             <>
               <DocumentMetadata
@@ -469,7 +504,7 @@ export default function DocumentsPage() {
                 onMarkAsViewed={handleMarkAsViewed}
                 markingId={markingId}
               />
-              <div className="flex flex-1 flex-col overflow-hidden p-6">
+              <div className="flex flex-1 flex-col overflow-hidden p-6 min-w-0">
                 <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
                   {!shouldUseCodeViewer ? (
                     <>
@@ -529,6 +564,8 @@ export default function DocumentsPage() {
           Erro ao carregar documentos: {error}
         </div>
       ) : null}
+      
+      <RefreshButton onRefresh={handleRefresh} isLoading={isLoading} />
     </div>
   );
 }
@@ -553,6 +590,9 @@ function DocumentMetadata({
   const summaryMetadata = extractSummaryMetadata(document, type);
   const showMarkAsViewed = Boolean(document.new && onMarkAsViewed);
   const documentId = (document as Record<string, unknown>)[config.idKey as string] as string;
+  
+  // Extract tester summary if type is tester
+  const testerSummary = type === "tester" ? extractTesterSummary(document.content) : null;
 
   const baseMetaEntries = [
     { label: "Projeto", value: document.project_id ?? "—" },
@@ -566,27 +606,57 @@ function DocumentMetadata({
     type === "prd" ? extractMetadataParameters(document.content) : [];
 
   return (
-    <div className="border-b border-slate-800 bg-slate-950/80 px-5 py-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div className="flex-1 space-y-2">
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-500">{config.label}</p>
-          <div className="flex items-center gap-2">
-            <h2 className="text-xl font-semibold text-white break-all">{id as string}</h2>
+    <div className="border-b border-slate-800 bg-slate-950/80 px-5 py-4 min-w-0">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between min-w-0">
+        <div className="flex-1 space-y-2 min-w-0 max-w-full">
+          <p className="text-xs uppercase tracking-[0.3em] text-slate-500 break-words overflow-wrap-anywhere">{config.label}</p>
+          <div className="flex items-center gap-2 min-w-0 max-w-full">
+            <h2 className="text-xl font-semibold text-white break-all overflow-wrap-anywhere min-w-0 max-w-full">{id as string}</h2>
             {document.new ? (
-              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-emerald-200">
+              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[0.65rem] font-semibold uppercase tracking-wide text-emerald-200 flex-shrink-0">
                 Novo
               </span>
             ) : null}
           </div>
+          {testerSummary && testerSummary.summary ? (
+            <div
+              className={clsx(
+                "min-w-0 max-w-full rounded-lg border px-3 py-2 text-sm font-medium",
+                testerSummary.hasError
+                  ? "border-rose-500/50 bg-rose-500/10 text-rose-200"
+                  : "border-emerald-500/50 bg-emerald-500/10 text-emerald-200"
+              )}
+              style={{ 
+                wordBreak: "break-word", 
+                overflowWrap: "anywhere",
+                whiteSpace: "normal",
+                minWidth: 0,
+                maxWidth: "100%"
+              }}
+            >
+              <p 
+                className="min-w-0 max-w-full" 
+                style={{ 
+                  wordBreak: "break-word", 
+                  overflowWrap: "anywhere",
+                  whiteSpace: "normal",
+                  minWidth: 0,
+                  maxWidth: "100%"
+                }}
+              >
+                {testerSummary.summary}
+              </p>
+            </div>
+          ) : null}
           {document.notes ? (
-            <p className="max-w-2xl text-sm text-slate-300">{document.notes}</p>
+            <p className="max-w-2xl text-sm text-slate-300 break-words overflow-wrap-anywhere">{document.notes}</p>
           ) : null}
           {summaryMetadata.length ? (
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
               {summaryMetadata.map((entry, index) => (
-                <span key={`${entry.label}-${index}`} className="flex items-center gap-1">
-                  <span className="text-slate-500">{entry.label}:</span>
-                  <span className="text-slate-200">{entry.value}</span>
+                <span key={`${entry.label}-${index}`} className="flex items-center gap-1 break-words overflow-wrap-anywhere whitespace-normal">
+                  <span className="text-slate-500 break-words overflow-wrap-anywhere">{entry.label}:</span>
+                  <span className="text-slate-200 break-words overflow-wrap-anywhere">{entry.value}</span>
                 </span>
               ))}
             </div>
@@ -642,6 +712,151 @@ function extractContentMetadataEntries(content: unknown): { label: string; value
   }
 
   return entries;
+}
+
+function extractTesterSummary(content: unknown): { summary: string | null; hasError: boolean } {
+  if (!content || typeof content !== "object") {
+    return { summary: null, hasError: false };
+  }
+
+  const record = content as Record<string, unknown>;
+  
+  // Try different possible locations for summary
+  const summaryCandidates = [
+    record.summary,
+    record.test_summary,
+    record.result,
+    record.results,
+    record.test_results,
+    record.report,
+    record.message,
+    record.description
+  ];
+
+  let summaryText: string | null = null;
+  
+  // Helper function to recursively search for summary text
+  const findSummaryInObject = (obj: Record<string, unknown>, depth = 0): string | null => {
+    if (depth > 3) return null; // Limit recursion depth
+    
+    const summaryFields = ["summary", "message", "description", "result", "conclusion"];
+    for (const field of summaryFields) {
+      const value = obj[field];
+      if (typeof value === "string" && value.trim() && value.length > 10) {
+        return value;
+      }
+    }
+    
+    // Check nested objects
+    for (const key in obj) {
+      if (obj[key] && typeof obj[key] === "object" && !Array.isArray(obj[key])) {
+        const found = findSummaryInObject(obj[key] as Record<string, unknown>, depth + 1);
+        if (found) return found;
+      }
+    }
+    
+    return null;
+  };
+  
+  for (const candidate of summaryCandidates) {
+    if (typeof candidate === "string" && candidate.trim() && candidate.length > 10) {
+      summaryText = candidate;
+      break;
+    }
+    if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+      const found = findSummaryInObject(candidate as Record<string, unknown>);
+      if (found) {
+        summaryText = found;
+        break;
+      }
+    }
+  }
+  
+  // If still no summary found, try to generate one from report.files status
+  if (!summaryText && record.report && typeof record.report === "object") {
+    const report = record.report as Record<string, unknown>;
+    if (Array.isArray(report.files)) {
+      const files = report.files as Array<Record<string, unknown>>;
+      const totalFiles = files.length;
+      const filesWithErrors = files.filter(f => {
+        const errors = Array.isArray(f.build_errors) ? f.build_errors.length : 0;
+        const status = typeof f.status === "string" ? f.status.toLowerCase() : "";
+        return errors > 0 || (status !== "ok" && status !== "success" && status !== "");
+      }).length;
+      
+      if (totalFiles > 0) {
+        if (filesWithErrors > 0) {
+          summaryText = `${filesWithErrors} de ${totalFiles} arquivos com erros ou problemas`;
+        } else {
+          summaryText = `Todos os ${totalFiles} arquivos passaram nos testes`;
+        }
+      }
+    }
+  }
+
+  // Check for errors - look in report.files for build_errors
+  let hasError = false;
+  const errorCandidates = [
+    record.errors,
+    record.error,
+    record.failed,
+    record.failures,
+    record.status
+  ];
+
+  for (const candidate of errorCandidates) {
+    if (Array.isArray(candidate) && candidate.length > 0) {
+      hasError = true;
+      break;
+    }
+    if (typeof candidate === "boolean" && candidate === true) {
+      hasError = true;
+      break;
+    }
+    if (typeof candidate === "string" && (candidate.toLowerCase().includes("error") || candidate.toLowerCase().includes("fail"))) {
+      hasError = true;
+      break;
+    }
+    if (candidate && typeof candidate === "object") {
+      const obj = candidate as Record<string, unknown>;
+      if (Array.isArray(obj.errors) && obj.errors.length > 0) {
+        hasError = true;
+        break;
+      }
+      if (typeof obj.status === "string" && (obj.status.toLowerCase() === "failed" || obj.status.toLowerCase() === "error")) {
+        hasError = true;
+        break;
+      }
+    }
+  }
+
+  // Check report.files for build_errors
+  if (record.report && typeof record.report === "object") {
+    const report = record.report as Record<string, unknown>;
+    if (Array.isArray(report.files)) {
+      for (const file of report.files) {
+        if (file && typeof file === "object") {
+          const fileObj = file as Record<string, unknown>;
+          if (Array.isArray(fileObj.build_errors) && fileObj.build_errors.length > 0) {
+            hasError = true;
+            break;
+          }
+          if (fileObj.status && typeof fileObj.status === "string" && 
+              (fileObj.status.toLowerCase() !== "ok" && fileObj.status.toLowerCase() !== "success")) {
+            hasError = true;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Also check if summary itself indicates error
+  if (summaryText && (summaryText.toLowerCase().includes("error") || summaryText.toLowerCase().includes("fail"))) {
+    hasError = true;
+  }
+
+  return { summary: summaryText, hasError };
 }
 
 function extractSummaryMetadata(

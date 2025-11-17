@@ -21,9 +21,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         } fixed bottom-0 left-0 top-0 z-40 w-60 border-r border-slate-800 bg-slate-900/80 backdrop-blur transition-transform duration-200 lg:static`}
       >
         <div className="flex h-16 items-center justify-between px-6">
-          <span className="text-lg font-semibold tracking-tight text-white">
-            Agents Hub
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="text-lg font-semibold tracking-tight text-white break-words overflow-wrap-anywhere">
+              Agents Hub
+            </span>
+            <div id="refresh-button-container" className="flex items-center" />
+          </div>
           <button
             className="text-slate-400 hover:text-white lg:hidden"
             onClick={() => setIsMobileOpen(false)}
@@ -64,10 +67,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               ☰
             </button>
             <div>
-              <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-500 break-words overflow-wrap-anywhere">
                 Multi-Agent Monitor
               </p>
-              <p className="text-lg font-semibold text-white">Supabase Observatory</p>
+              <p className="text-lg font-semibold text-white break-words overflow-wrap-anywhere">Supabase Observatory</p>
             </div>
           </div>
         </header>

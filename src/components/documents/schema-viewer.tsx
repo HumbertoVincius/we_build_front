@@ -146,9 +146,9 @@ export function SchemaViewer({ payload }: SchemaViewerProps) {
                     <div className="flex items-center gap-3">
                       <span className="text-slate-500">{isExpanded ? "▾" : "▸"}</span>
                       <div>
-                        <h3 className="text-sm font-semibold text-white">{table.name}</h3>
+                        <h3 className="text-sm font-semibold text-white break-words overflow-wrap-anywhere">{table.name}</h3>
                         {table.description && (
-                          <p className="text-xs text-slate-400 mt-1">{table.description}</p>
+                          <p className="text-xs text-slate-400 mt-1 break-words overflow-wrap-anywhere">{table.description}</p>
                         )}
                       </div>
                     </div>
@@ -173,7 +173,7 @@ export function SchemaViewer({ payload }: SchemaViewerProps) {
                               <div className="flex items-start justify-between gap-4">
                                 <div className="flex-1">
                                   <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-sm font-medium text-white">
+                                    <span className="text-sm font-medium text-white break-words overflow-wrap-anywhere">
                                       {column.name}
                                     </span>
                                     {column.is_primary_key && (
@@ -201,7 +201,7 @@ export function SchemaViewer({ payload }: SchemaViewerProps) {
                                     )}
                                   </div>
                                   {column.notes && (
-                                    <p className="text-xs text-slate-500 mt-1">{column.notes}</p>
+                                    <p className="text-xs text-slate-500 mt-1 break-words overflow-wrap-anywhere">{column.notes}</p>
                                   )}
                                 </div>
                               </div>
@@ -225,7 +225,7 @@ export function SchemaViewer({ payload }: SchemaViewerProps) {
                                 <div className="flex items-start justify-between gap-4">
                                   <div className="flex-1">
                                     <div className="flex items-center gap-2 mb-1">
-                                      <span className="text-sm font-medium text-white">
+                                      <span className="text-sm font-medium text-white break-words overflow-wrap-anywhere">
                                         {index.name}
                                       </span>
                                     </div>
@@ -236,7 +236,7 @@ export function SchemaViewer({ payload }: SchemaViewerProps) {
                                       </span>
                                     </div>
                                     {index.notes && (
-                                      <p className="text-xs text-slate-500 mt-1">{index.notes}</p>
+                                      <p className="text-xs text-slate-500 mt-1 break-words overflow-wrap-anywhere">{index.notes}</p>
                                     )}
                                   </div>
                                 </div>
