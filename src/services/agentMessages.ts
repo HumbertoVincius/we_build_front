@@ -1,3 +1,4 @@
+import { ENV_KEYS } from "@/lib/env";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
 import type { AgentMessage, AgentMessageStatus } from "@/types/tables";
 
@@ -28,7 +29,7 @@ export async function fetchAgentMessages(
       data: [],
       count: 0,
       error:
-        "Supabase credentials are missing. Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+        `Supabase credentials are missing. Configure ${ENV_KEYS.SUPABASE_URL} and ${ENV_KEYS.SUPABASE_ANON_KEY}.`
     };
   }
 
@@ -109,7 +110,7 @@ export async function updateAgentMessage(
   if (!isSupabaseConfigured) {
     return {
       error:
-        "Supabase credentials are missing. Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+        `Supabase credentials are missing. Configure ${ENV_KEYS.SUPABASE_URL} and ${ENV_KEYS.SUPABASE_ANON_KEY}.`
     };
   }
 
@@ -153,7 +154,7 @@ export async function deleteAgentMessage(
   if (!isSupabaseConfigured) {
     return {
       error:
-        "Supabase credentials are missing. Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+        `Supabase credentials are missing. Configure ${ENV_KEYS.SUPABASE_URL} and ${ENV_KEYS.SUPABASE_ANON_KEY}.`
     };
   }
 

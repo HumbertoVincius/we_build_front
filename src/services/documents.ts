@@ -1,4 +1,5 @@
 import { DOCUMENT_TYPES } from "@/lib/documentConfig";
+import { ENV_KEYS } from "@/lib/env";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
 import type { DocumentRecord, DocumentType } from "@/types/tables";
 
@@ -27,7 +28,7 @@ export async function fetchDocuments<T extends DocumentRecord>(
       data: [],
       count: 0,
       error:
-        "Supabase credentials are missing. Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+        `Supabase credentials are missing. Configure ${ENV_KEYS.SUPABASE_URL} and ${ENV_KEYS.SUPABASE_ANON_KEY}.`
     };
   }
 
@@ -113,7 +114,7 @@ export async function deleteDocument(
   if (!isSupabaseConfigured) {
     return {
       error:
-        "Supabase credentials are missing. Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+        `Supabase credentials are missing. Configure ${ENV_KEYS.SUPABASE_URL} and ${ENV_KEYS.SUPABASE_ANON_KEY}.`
     };
   }
 
@@ -137,7 +138,7 @@ export async function markDocumentOpened(
   if (!isSupabaseConfigured) {
     return {
       error:
-        "Supabase credentials are missing. Configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY."
+        `Supabase credentials are missing. Configure ${ENV_KEYS.SUPABASE_URL} and ${ENV_KEYS.SUPABASE_ANON_KEY}.`
     };
   }
 
